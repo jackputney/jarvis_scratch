@@ -1,0 +1,48 @@
+# Jarvis — exact pinned dependencies (from the verified working venv, Python 3.11)
+# Install: pip install -r requirements.txt
+#
+# Versions are pinned exactly (==) so installs are reproducible and a transitive
+# major-version bump can't silently break the app (e.g. cartesia 1.x → 3.x).
+
+# Anthropic Claude API
+anthropic==0.107.1
+
+# STT — Apple Silicon accelerated Whisper (mlx + Metal backend)
+mlx-whisper==0.4.3
+mlx==0.31.2
+mlx-metal==0.31.2
+
+# Wake word detection
+openwakeword==0.6.0
+onnxruntime==1.26.0
+
+# Audio I/O
+PyAudio==0.2.14
+
+# Voice Activity Detection
+webrtcvad==2.0.10
+
+# UI
+PyQt6==6.11.0
+PyQt6-Qt6==6.11.1
+PyQt6_sip==13.11.1
+
+# TTS
+cartesia==3.2.0
+pyttsx3==2.99
+
+# Networking (web search, Cartesia streaming)
+requests==2.34.2
+
+# Env vars
+python-dotenv==1.2.2
+
+# Numerical (audio conversion + openwakeword)
+numpy==2.4.6
+
+# Control dashboard (localhost Flask app)
+Flask==3.1.3
+Werkzeug==3.1.8
+
+# Tests (dev)
+pytest==9.0.3

@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Jarvis Control</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="dot" id="state-dot"></span> Jarvis</div>
+    <div class="status">
+      <span id="state-label">IDLE</span>
+      <span class="sep">·</span>
+      <span id="mute-label">unmuted</span>
+      <span class="sep">·</span>
+      <span id="uptime">up 0s</span>
+      <span class="sep">·</span>
+      <span id="models">—</span>
+    </div>
+  </header>
+
+  <main class="grid">
+    <!-- Spend -->
+    <section class="card" id="spend-card">
+      <h2>Spend</h2>
+      <div class="spend-row">
+        <div class="stat"><div class="value" id="spend-today">$0.00</div><div class="label">today</div></div>
+        <div class="stat"><div class="value" id="spend-week">$0.00</div><div class="label">week</div></div>
+        <div class="stat"><div class="value" id="spend-month">$0.00</div><div class="label">month</div></div>
+      </div>
+      <div class="bar-wrap"><div class="bar" id="budget-bar"></div></div>
+      <div class="bar-caption" id="budget-caption">0% of daily budget</div>
+      <div class="budget-edit">
+        <label>Daily $ <input type="number" step="0.5" id="daily-budget" /></label>
+        <label>Monthly $ <input type="number" step="1" id="monthly-budget" /></label>
+        <button id="save-budget">Save</button>
+      </div>
+    </section>
+
+    <!-- Settings -->
+    <section class="card" id="settings-card">
+      <h2>Settings</h2>
+      <div class="settings-grid">
+        <label class="toggle"><input type="checkbox" id="set-wake-enabled" /> Wake word on</label>
+        <label class="toggle"><input type="checkbox" id="set-confirm" /> Confirm before tool execute</label>
+        <label>Whisper model <input type="text" id="set-whisper" /></label>
+        <label>Fast model <input type="text" id="set-fast" /></label>
+        <label>Smart model <input type="text" id="set-smart" /></label>
+        <label>Routing threshold <input type="number" id="set-threshold" /></label>
+        <label>Wake word <input type="text" id="set-wakeword" /></label>
+        <label>TTS voice id <input type="text" id="set-voice" /></label>
+      </div>
+      <button id="save-settings">Save settings</button>
+      <span class="hint">Applies live — no restart.</span>
+    </section>
+
+    <!-- Talk -->
+    <section class="card" id="talk-card">
+      <h2>Talk to Jarvis</h2>
+      <div class="talk-row">
+        <input type="text" id="talk-input" placeholder="Type a message…" />
+        <button id="talk-send">Send</button>
+      </div>
+      <div class="talk-reply" id="talk-reply"></div>
+    </section>
+
+    <!-- Conversation log -->
+    <section class="card wide" id="log-card">
+      <h2>Conversation log</h2>
+      <table class="log">
+        <thead><tr><th>Heard</th><th>Response</th><th>Model</th><th>ms</th><th>$</th></tr></thead>
+        <tbody id="log-body"></tbody>
+      </table>
+    </section>
+
+    <!-- Variables -->
+    <section class="card" id="vars-card">
+      <h2>Memory · variables</h2>
+      <table class="kv"><tbody id="vars-body"></tbody></table>
+      <div class="kv-add">
+        <input type="text" id="var-key" placeholder="key" />
+        <input type="text" id="var-value" placeholder="value" />
+        <button id="var-add">Add</button>
+      </div>
+    </section>
+
+    <!-- Notes -->
+    <section class="card" id="notes-card">
+      <h2>Memory · notes</h2>
+      <ul class="notes" id="notes-list"></ul>
+      <div class="note-edit">
+        <input type="text" id="note-title" placeholder="title" />
+        <textarea id="note-content" placeholder="content…"></textarea>
+        <button id="note-save">Save note</button>
+      </div>
+    </section>
+  </main>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
