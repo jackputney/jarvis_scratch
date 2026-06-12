@@ -19,44 +19,26 @@ import threading
 import time
 from collections import deque
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
-DB_PATH = Path(__file__).parent / "memory" / "variables.db"
+from memory.db import DB_PATH, connect, init_db
 MAX_EVENTS = 200
 
 _lock = threading.Lock()
 _events: deque[dict] = deque(maxlen=MAX_EVENTS)
 _state: dict[str, Any] = {
-    "pipeline_state": "IDLE",
+    "pipeline_state": "IDLE",  # IDLE | LISTENING | THINKING | WAITING_CONFIRM | SPEAKING
     "muted": False,
     "started_at": time.time(),
 }
 
 _init_lock = threading.Lock()
-_initialised = False
+_initialised = True  # schema owned by memory.db.init_db()
 
 
 def _connect() -> sqlite3.Connection:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH, timeout=5.0)
-    global _initialised
-    if not _initialised:
-        with _init_lock:
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS conversations ("
-                "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
-                "  timestamp TEXT NOT NULL,"
-                "  heard TEXT,"
-                "  response TEXT,"
-                "  model TEXT,"
-                "  latency_ms INTEGER,"
-                "  cost_usd REAL"
-                ")"
-            )
-            conn.commit()
-            _initialised = True
-    return conn
+    init_db()
+    return connect()
 
 
 # ---------------------------------------------------------------------------

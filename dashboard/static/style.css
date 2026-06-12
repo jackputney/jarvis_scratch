@@ -36,7 +36,8 @@ body {
 .brand { font-weight: 600; font-size: 16px; display: flex; align-items: center; gap: 9px; }
 .dot { width: 11px; height: 11px; border-radius: 50%; background: var(--accent); transition: background .3s; }
 .dot.listening { background: #2ecc71; }
-.dot.thinking { background: var(--warn); }
+.dot.thinking { background: var(--accent); }
+.dot.waiting_confirm { background: var(--warn); }
 .dot.speaking { background: var(--accent); }
 .dot.capped { background: var(--danger); }
 

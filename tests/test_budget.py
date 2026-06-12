@@ -6,7 +6,7 @@ from config import Config
 
 
 def _fake_call(reply="ok", model="claude-haiku-4-5", cost=0.001):
-    def _inner(text, cfg, history=None):
+    def _inner(text, cfg, history=None, on_state=None):
         return reply, model, cost
     return _inner
 
@@ -15,7 +15,7 @@ def test_hard_stop_when_over_daily_budget(temp_env, monkeypatch):
     monkeypatch.setattr(costs, "get_spend", lambda period: 5.0)
     calls = []
     monkeypatch.setattr(pipeline, "_call_claude",
-                        lambda text, cfg, history=None: calls.append(text) or ("hi", "m", 0.0))
+                        lambda text, cfg, history=None, on_state=None: calls.append(text) or ("hi", "m", 0.0))
 
     cfg = Config(daily_budget_usd=2.0)
     result = pipeline.process_query("hello", cfg)

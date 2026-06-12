@@ -66,7 +66,12 @@ def wait_for_confirm(
     cancel_check: Callable[[], bool] | None = None,
 ) -> str:
     """Block until allow, deny, timeout, or cancel. Returns decision string."""
+    global _pending
     _clear_cancel_flag()
+    with _lock:
+        if _pending is not None:
+            return "deny"
+
     event = threading.Event()
     confirm_id = str(uuid.uuid4())
     entry = {
@@ -79,7 +84,6 @@ def wait_for_confirm(
         "event": event,
     }
     with _lock:
-        global _pending
         _pending = entry
 
     deadline = time.time() + timeout_sec

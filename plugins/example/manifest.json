@@ -1,0 +1,22 @@
+{
+  "name": "example_automation",
+  "description": "Example plugin — replace with your automation",
+  "version": "1.0.0",
+  "mcp_command": ["python", "server.py"],
+  "risk_tier": "confirm_required",
+  "triggers": [
+    {
+      "type": "cron",
+      "schedule": "0 8 * * *",
+      "prompt": "Morning briefing: today's calendar and top unread emails"
+    },
+    {
+      "type": "webhook",
+      "path": "/hooks/example"
+    },
+    {
+      "type": "event",
+      "on": "job.done"
+    }
+  ]
+}

@@ -83,3 +83,28 @@ def get_credentials() -> Credentials:
 def get_google_service(api_name: str, api_version: str) -> Resource:
     """Build an authenticated Google API client."""
     return build(api_name, api_version, credentials=get_credentials(), cache_discovery=False)
+
+
+def ensure_google_ready(*, interactive: bool = True) -> bool:
+    """Load or refresh credentials at startup — never mid-voice on first OAuth.
+
+    Returns True if Google tools are ready, False if credentials are not configured.
+    When interactive=True and no token exists yet, opens the browser once before
+    the voice loop starts.
+    """
+    try:
+        _client_config()
+    except RuntimeError:
+        return False
+
+    if TOKEN_PATH.exists():
+        get_credentials()
+        return True
+
+    if not interactive:
+        logger.info("🔐 Google token missing — sign in via dashboard or restart with browser.")
+        return False
+
+    logger.info("🔐 Google sign-in required — opening browser (one-time setup).")
+    get_credentials()
+    return True

@@ -5,10 +5,11 @@ A always-on-top popup panel (dark rounded box matching the dashboard theme)
 shows the animated orb plus a live status label. The orb reflects pipeline
 state:
 
-  IDLE      — static orb
-  LISTENING — slow breathing pulse
-  THINKING  — fast clockwise rotating arc
-  SPEAKING  — amplitude ripple rings
+  IDLE             — static orb
+  LISTENING        — slow breathing pulse
+  THINKING         — fast clockwise rotating arc
+  WAITING_CONFIRM  — amber pulse (dashboard approval needed)
+  SPEAKING         — amplitude ripple rings
 
 State changes come from the pipeline thread via set_state(), which is safe to
 call from any thread — it posts to the Qt event loop via QMetaObject.invokeMethod.
@@ -62,6 +63,7 @@ class JarvisState(Enum):
     IDLE = auto()
     LISTENING = auto()
     THINKING = auto()
+    WAITING_CONFIRM = auto()
     SPEAKING = auto()
 
 
@@ -69,6 +71,7 @@ _STATE_LABELS = {
     JarvisState.IDLE: "Ready",
     JarvisState.LISTENING: "Listening…",
     JarvisState.THINKING: "Thinking…",
+    JarvisState.WAITING_CONFIRM: "Approval needed…",
     JarvisState.SPEAKING: "Speaking…",
 }
 
@@ -88,6 +91,8 @@ class OrbWidget(QWidget):
     BG_COLOUR = QColor(0, 0, 0, 0)
 
     def _base_colour(self) -> QColor:
+        if self.state == JarvisState.WAITING_CONFIRM:
+            return self.WARN_COLOUR
         if self.budget_level == "capped":
             return self.CAPPED_COLOUR
         if self.budget_level == "warn":
@@ -152,6 +157,8 @@ class OrbWidget(QWidget):
 
         if self.state == JarvisState.LISTENING:
             scale = 1.0 + 0.1 * math.sin(self._tick * (2 * math.pi / 90))
+        elif self.state == JarvisState.WAITING_CONFIRM:
+            scale = 1.0 + 0.08 * math.sin(self._tick * (2 * math.pi / 60))
         elif self.state == JarvisState.THINKING:
             arc_angle = (self._tick * 4) % 360
         elif self.state == JarvisState.SPEAKING:
@@ -159,8 +166,9 @@ class OrbWidget(QWidget):
 
         r = base_r * scale
 
+        glow_colour = QColor(255, 176, 0, 100) if self.state == JarvisState.WAITING_CONFIRM else QColor(0, 191, 255, 80)
         glow_gradient = QRadialGradient(QPointF(cx, cy), r * 1.8)
-        glow_gradient.setColorAt(0.0, QColor(0, 191, 255, 80))
+        glow_gradient.setColorAt(0.0, glow_colour)
         glow_gradient.setColorAt(1.0, QColor(0, 0, 0, 0))
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QBrush(glow_gradient))

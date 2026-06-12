@@ -36,6 +36,23 @@ logging.basicConfig(level=logging.INFO, format="%(message)s")
 DASHBOARD_URL = "http://127.0.0.1:7777"
 
 
+def _init_persistence() -> None:
+    from memory.db import init_db
+
+    init_db()
+
+
+def _prepare_google(cfg: Config) -> None:
+    if not cfg.google_client_id or not cfg.google_client_secret:
+        return
+    try:
+        from tools.google_auth import ensure_google_ready
+
+        ensure_google_ready(interactive=True)
+    except Exception as exc:  # noqa: BLE001
+        print(f"⚠️  Google sign-in skipped ({exc}). Google tools may fail until configured.")
+
+
 def _check_keys(cfg: Config) -> None:
     if not cfg.anthropic_api_key:
         print()
@@ -152,6 +169,8 @@ def _run_headless(cfg: Config) -> None:
 def main() -> None:
     cfg = Config.load()
     _check_keys(cfg)
+    _init_persistence()
+    _prepare_google(cfg)
     _start_dashboard()
     _print_banner(cfg)
 

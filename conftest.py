@@ -30,14 +30,14 @@ def temp_env(tmp_path, monkeypatch):
     import config
     import costs
     import events
-    from memory import knowledge, variables
+    from memory import db as memory_db, knowledge, variables
 
     db = tmp_path / "variables.db"
 
+    monkeypatch.setattr(memory_db, "DB_PATH", db)
+    memory_db.reset_init_flag_for_tests()
     monkeypatch.setattr(costs, "DB_PATH", db)
-    monkeypatch.setattr(costs, "_initialised", False)
     monkeypatch.setattr(events, "DB_PATH", db)
-    monkeypatch.setattr(events, "_initialised", False)
     monkeypatch.setattr(variables, "DB_PATH", db)
     monkeypatch.setattr(knowledge, "KNOWLEDGE_DIR", tmp_path / "knowledge")
     monkeypatch.setattr(config, "CONFIG_PATH", tmp_path / "config.json")

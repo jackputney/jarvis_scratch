@@ -4,7 +4,7 @@ costs.py — Token tracking and budget accounting for Jarvis.
 Every Claude call's real token usage (read from the Anthropic response `usage`
 field — never estimated) is logged to the `usage_log` table in
 memory/variables.db together with the computed USD cost. The pipeline uses
-get_spend() to enforce daily/monthly budgets BEFORE each call.
+get_spend() to enforce daily and monthly budgets BEFORE each call.
 
 Pricing (USD per million tokens, input / output):
     haiku   $1 / $5
@@ -18,10 +18,9 @@ from __future__ import annotations
 import sqlite3
 import threading
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Any
 
-DB_PATH = Path(__file__).parent / "memory" / "variables.db"
+from memory.db import DB_PATH, connect, init_db
 
 # USD per single token (input, output).
 _PER_MTOK = {
@@ -31,29 +30,12 @@ _PER_MTOK = {
 _DEFAULT_TIER = "sonnet"  # safest (most expensive) fallback for unknown models
 
 _init_lock = threading.Lock()
-_initialised = False
+_initialised = True  # schema owned by memory.db.init_db()
 
 
 def _connect() -> sqlite3.Connection:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH, timeout=5.0)
-    global _initialised
-    if not _initialised:
-        with _init_lock:
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS usage_log ("
-                "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
-                "  timestamp TEXT NOT NULL,"
-                "  model TEXT NOT NULL,"
-                "  input_tokens INTEGER NOT NULL,"
-                "  output_tokens INTEGER NOT NULL,"
-                "  cost_usd REAL NOT NULL,"
-                "  query_preview TEXT"
-                ")"
-            )
-            conn.commit()
-            _initialised = True
-    return conn
+    init_db()
+    return connect()
 
 
 def _tier_for_model(model: str) -> str:

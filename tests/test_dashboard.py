@@ -73,3 +73,22 @@ def test_confirm_respond_requires_id(client):
 def test_confirm_respond_404_when_no_pending(client):
     r = client.post("/api/confirm/respond", json={"id": "missing", "allow": True})
     assert r.status_code == 404
+
+
+def test_message_busy_returns_409(client, temp_env, monkeypatch):
+    import pipeline
+
+    monkeypatch.setattr(
+        pipeline,
+        "process_query",
+        lambda text, cfg: {
+            "reply": pipeline.BUSY_MESSAGE,
+            "busy": True,
+            "model": "(busy)",
+            "latency_ms": 0,
+            "cost": 0.0,
+        },
+    )
+    r = client.post("/api/message", json={"text": "hi"})
+    assert r.status_code == 409
+    assert r.get_json()["busy"] is True

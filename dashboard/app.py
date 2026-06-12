@@ -140,6 +140,12 @@ def create_app() -> Flask:
         # heavy audio/LLM stack (e.g. in unit tests).
         import pipeline
         result = pipeline.process_query(text, Config.load())
+        if result.get("busy"):
+            return jsonify({
+                "ok": False,
+                "busy": True,
+                "reply": result["reply"],
+            }), 409
         reply = result["reply"]
         if result.get("warning"):
             reply = result["warning"] + " " + reply

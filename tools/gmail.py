@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import base64
 from email.mime.text import MIMEText
+import re
 
 from tools.google_auth import get_google_service
+
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 def get_gmail_service():
@@ -73,6 +76,8 @@ def send_email(to: str, subject: str, body: str) -> str:
     to = (to or "").strip()
     if not to:
         return "Recipient address is required."
+    if not _EMAIL_RE.match(to):
+        return f"Invalid email address: {to!r}. Please provide a full address with @ and a domain."
     message = MIMEText(body or "", "plain", "utf-8")
     message["to"] = to
     message["subject"] = subject or ""

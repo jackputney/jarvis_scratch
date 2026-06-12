@@ -23,6 +23,7 @@ import re
 import threading
 import time
 from collections.abc import Callable
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import date
 from typing import Any
 
@@ -36,13 +37,18 @@ import events
 from config import Config
 from memory.knowledge import get_recent_notes
 from memory.variables import build_variables_block
-from tools.registry import TOOL_DEFINITIONS, dispatch_tool
+from tools.registry import CONFIRM_REQUIRED_TOOLS, TOOL_DEFINITIONS, dispatch_tool
 from tts.cartesia import speak, stop_speech
 
 logger = logging.getLogger("jarvis.pipeline")
 
 _interrupt = threading.Event()
+_query_lock = threading.Lock()
+# TODO(Phase 1): Replace thread-pool Claude calls with AsyncAnthropic + streaming so
+# Stop cancels the in-flight HTTP request and stops burning tokens after interrupt.
+_claude_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="jarvis-claude")
 _QUEUE_POLL_SEC = 0.25
+CLAUDE_HTTP_TIMEOUT_SEC = 30.0
 
 AUDIO_RATE = 16000
 FRAME_DURATION_MS = 30
@@ -60,6 +66,13 @@ AUDIO_THREAD_RESTART_DELAY = 2.0
 
 WARN_80_MESSAGE = "Heads up, I'm at 80 percent of today's budget."
 CAP_MESSAGE = "I've hit today's budget cap — raise it in the dashboard if you need me."
+MONTHLY_CAP_MESSAGE = (
+    "I've hit this month's budget cap — raise it in the dashboard if you need me."
+)
+CONFIRM_PROMPT = (
+    "I need your approval — check the dashboard to allow or deny this."
+)
+BUSY_MESSAGE = "I'm still working on your last request — try again in a moment."
 
 
 def request_interrupt() -> None:
@@ -331,12 +344,30 @@ def _build_system_prompt(cfg: Config) -> str:
     )
 
 
+def _create_claude_message(client: anthropic.Anthropic, **kwargs: Any) -> Any:
+    """Run a Claude HTTP call off the pipeline thread (interruptible wait)."""
+    return client.messages.create(**kwargs)
+
+
+def _emit_pipeline_state(
+    name: str,
+    on_state: Callable[[str], None] | None,
+) -> None:
+    events.set_pipeline_state(name)
+    if on_state:
+        on_state(name)
+
+
 def _call_claude(
     text: str,
     cfg: Config,
     history: list[dict[str, Any]] | None = None,
+    on_state: Callable[[str], None] | None = None,
 ) -> tuple[str, str, float]:
-    client = anthropic.Anthropic(api_key=cfg.anthropic_api_key)
+    client = anthropic.Anthropic(
+        api_key=cfg.anthropic_api_key,
+        timeout=CLAUDE_HTTP_TIMEOUT_SEC,
+    )
     model = cfg.claude_model_fast if cfg.route_to_fast_model(text) else cfg.claude_model_smart
     logger.info("🧠 Routing to %s", model)
 
@@ -345,18 +376,38 @@ def _call_claude(
     system_prompt = _build_system_prompt(cfg)
     total_cost = 0.0
 
-    for round_idx in range(5):
+    for _round_idx in range(5):
         if _interrupt.is_set():
             logger.info("⏹️  Claude loop aborted (interrupt).")
             return "", model, total_cost
 
-        response = client.messages.create(
+        future: Future[Any] = _claude_executor.submit(
+            _create_claude_message,
+            client,
             model=model,
             max_tokens=1024,
             system=system_prompt,
             tools=TOOL_DEFINITIONS,
             messages=messages,
         )
+        while not future.done():
+            if _interrupt.is_set():
+                logger.info("⏹️  Stop during Claude — abandoning in-flight request.")
+                return "", model, total_cost
+            time.sleep(0.25)
+
+        try:
+            response = future.result()
+        except Exception as exc:  # noqa: BLE001
+            logger.error("⚠️  Claude API error: %s", exc, exc_info=True)
+            if _interrupt.is_set():
+                return "", model, total_cost
+            return "Sorry, I couldn't reach my brain. Please try again.", model, total_cost
+
+        if _interrupt.is_set():
+            logger.info("⏹️  Claude loop aborted after response (interrupt).")
+            return "", model, total_cost
+
         total_cost += costs.log_usage(model, getattr(response, "usage", None), text)
 
         reply_text = ""
@@ -377,6 +428,17 @@ def _call_claude(
                 logger.info("⏹️  Tool dispatch skipped (interrupt).")
                 return reply_text.strip() or "Stopped.", model, total_cost
             logger.info("🔧 Tool: %s(%s)", tu["name"], tu["input"])
+            needs_confirm = (
+                cfg.confirm_before_execute and tu["name"] in CONFIRM_REQUIRED_TOOLS
+            )
+            if needs_confirm:
+                _emit_pipeline_state("WAITING_CONFIRM", on_state)
+                if not _interrupt.is_set():
+                    logger.info("🔔 Awaiting dashboard approval for %s", tu["name"])
+                    speak(CONFIRM_PROMPT, voice_id=cfg.cartesia_voice_id)
+            if _interrupt.is_set():
+                logger.info("⏹️  Tool confirm skipped (interrupt).")
+                return reply_text.strip() or "Stopped.", model, total_cost
             result = dispatch_tool(
                 tu["name"],
                 tu["input"],
@@ -384,6 +446,8 @@ def _call_claude(
                 confirm_timeout_sec=cfg.confirm_timeout_sec,
                 cancel_check=interrupt_requested,
             )
+            if needs_confirm and not _interrupt.is_set():
+                _emit_pipeline_state("THINKING", on_state)
             logger.info("   → %s", result[:120])
             if _interrupt.is_set():
                 logger.info("⏹️  Cycle aborted during tool confirm.")
@@ -407,40 +471,83 @@ def _should_warn_80() -> bool:
 
 
 def budget_level(cfg: Config) -> str:
-    spend = costs.get_spend("today")
-    if cfg.daily_budget_usd > 0 and spend >= cfg.daily_budget_usd:
+    spend_today = costs.get_spend("today")
+    spend_month = costs.get_spend("month")
+    if cfg.daily_budget_usd > 0 and spend_today >= cfg.daily_budget_usd:
         return "capped"
-    if cfg.daily_budget_usd > 0 and spend >= 0.8 * cfg.daily_budget_usd:
+    if cfg.monthly_budget_usd > 0 and spend_month >= cfg.monthly_budget_usd:
+        return "capped"
+    if cfg.daily_budget_usd > 0 and spend_today >= 0.8 * cfg.daily_budget_usd:
+        return "warn"
+    if cfg.monthly_budget_usd > 0 and spend_month >= 0.8 * cfg.monthly_budget_usd:
         return "warn"
     return "normal"
 
 
-def process_query(text: str, cfg: Config) -> dict:
-    spend_today = costs.get_spend("today")
-    if cfg.daily_budget_usd > 0 and spend_today >= cfg.daily_budget_usd:
-        logger.warning("🛑 Daily budget cap reached ($%.2f) — skipping API call.", spend_today)
-        events.record_conversation(text, CAP_MESSAGE, "(capped)", 0, 0.0)
-        return {"reply": CAP_MESSAGE, "warning": None, "capped": True,
-                "model": "(capped)", "latency_ms": 0, "cost": 0.0}
+def _should_store_in_history(reply: str) -> bool:
+    """Skip interrupted or placeholder replies so follow-ups stay clean."""
+    if _interrupt.is_set():
+        return False
+    cleaned = (reply or "").strip()
+    if not cleaned:
+        return False
+    if cleaned in {"Stopped.", "Stopped"}:
+        return False
+    return True
 
-    warning = None
-    if cfg.daily_budget_usd > 0 and spend_today >= 0.8 * cfg.daily_budget_usd and _should_warn_80():
-        warning = WARN_80_MESSAGE
-        logger.warning("⚠️  80%% of daily budget used ($%.2f).", spend_today)
 
-    t0 = time.time()
-    history = conversation.build_messages(
-        cfg.conversation_history_turns,
-        cfg.conversation_history_max_chars,
-    )
-    reply, model, cost = _call_claude(text, cfg, history=history)
-    latency_ms = int((time.time() - t0) * 1000)
-    if reply:
-        conversation.add_turn(text, reply)
-    events.record_conversation(text, reply or "(interrupted)", model, latency_ms, cost)
-    logger.info("💰 Call cost $%.4f (%dms) — %s", cost, latency_ms, model)
-    return {"reply": reply, "warning": warning, "capped": False,
-            "model": model, "latency_ms": latency_ms, "cost": cost}
+def process_query(
+    text: str,
+    cfg: Config,
+    on_state: Callable[[str], None] | None = None,
+) -> dict:
+    if not _query_lock.acquire(blocking=False):
+        logger.warning("⏳ Query rejected — another request is in flight.")
+        return {
+            "reply": BUSY_MESSAGE,
+            "warning": None,
+            "capped": False,
+            "busy": True,
+            "model": "(busy)",
+            "latency_ms": 0,
+            "cost": 0.0,
+        }
+
+    try:
+        spend_today = costs.get_spend("today")
+        spend_month = costs.get_spend("month")
+        if cfg.daily_budget_usd > 0 and spend_today >= cfg.daily_budget_usd:
+            logger.warning("🛑 Daily budget cap reached ($%.2f) — skipping API call.", spend_today)
+            events.record_conversation(text, CAP_MESSAGE, "(capped)", 0, 0.0)
+            return {"reply": CAP_MESSAGE, "warning": None, "capped": True,
+                    "model": "(capped)", "latency_ms": 0, "cost": 0.0, "busy": False}
+
+        if cfg.monthly_budget_usd > 0 and spend_month >= cfg.monthly_budget_usd:
+            logger.warning("🛑 Monthly budget cap reached ($%.2f) — skipping API call.", spend_month)
+            events.record_conversation(text, MONTHLY_CAP_MESSAGE, "(capped)", 0, 0.0)
+            return {"reply": MONTHLY_CAP_MESSAGE, "warning": None, "capped": True,
+                    "model": "(capped)", "latency_ms": 0, "cost": 0.0, "busy": False}
+
+        warning = None
+        if cfg.daily_budget_usd > 0 and spend_today >= 0.8 * cfg.daily_budget_usd and _should_warn_80():
+            warning = WARN_80_MESSAGE
+            logger.warning("⚠️  80%% of daily budget used ($%.2f).", spend_today)
+
+        t0 = time.time()
+        history = conversation.build_messages(
+            cfg.conversation_history_turns,
+            cfg.conversation_history_max_chars,
+        )
+        reply, model, cost = _call_claude(text, cfg, history=history, on_state=on_state)
+        latency_ms = int((time.time() - t0) * 1000)
+        if _should_store_in_history(reply):
+            conversation.add_turn(text, reply)
+        events.record_conversation(text, reply or "(interrupted)", model, latency_ms, cost)
+        logger.info("💰 Call cost $%.4f (%dms) — %s", cost, latency_ms, model)
+        return {"reply": reply, "warning": warning, "capped": False, "busy": False,
+                "model": model, "latency_ms": latency_ms, "cost": cost}
+    finally:
+        _query_lock.release()
 
 
 def run_pipeline(
@@ -485,6 +592,8 @@ def run_pipeline(
                 if cfg.wake_word != current_wake_word:
                     logger.info("🔁 Wake word changed to %r — rebuilding listener.", cfg.wake_word)
                     audio_stop.set()
+                    if audio_thread is not None:
+                        audio_thread.join(timeout=5.0)
                     _ensure_wake_model(cfg.wake_word)
                     current_wake_word = cfg.wake_word
                     audio_stop = threading.Event()
@@ -494,6 +603,8 @@ def run_pipeline(
 
                 if audio_thread is not None and not audio_thread.is_alive():
                     logger.error("⚠️  Audio thread is dead — restarting it.")
+                    audio_stop.set()
+                    audio_thread.join(timeout=5.0)
                     audio_stop = threading.Event()
                     audio_thread = _start_audio_thread(
                         wake_event, capture_queue, capturing, paused, audio_stop, current_wake_word,
@@ -561,7 +672,7 @@ def run_pipeline(
                     continue
 
                 try:
-                    result = process_query(text, cfg)
+                    result = process_query(text, cfg, on_state=set_state)
                 except Exception as exc:  # noqa: BLE001
                     logger.error("⚠️  Query failed: %s", exc, exc_info=True)
                     result = {"reply": "Sorry, I couldn't reach my brain. Please check your API key.",

@@ -67,8 +67,16 @@ function fmtUptime(s) {
 
 function renderState(s) {
   const dot = $("state-dot");
-  dot.className = "dot " + s.pipeline_state.toLowerCase();
-  $("state-label").textContent = s.pipeline_state;
+  const stateKey = s.pipeline_state.toLowerCase();
+  dot.className = "dot " + stateKey;
+  const stateLabels = {
+    IDLE: "Idle",
+    LISTENING: "Listening",
+    THINKING: "Thinking",
+    WAITING_CONFIRM: "Waiting for approval",
+    SPEAKING: "Speaking",
+  };
+  $("state-label").textContent = stateLabels[s.pipeline_state] || s.pipeline_state;
   $("mute-label").textContent = s.muted ? "muted" : "unmuted";
   $("uptime").textContent = fmtUptime(s.uptime_seconds);
   $("models").textContent = `${s.models.fast} / ${s.models.smart}`;

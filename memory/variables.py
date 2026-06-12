@@ -10,19 +10,13 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from pathlib import Path
 
-DB_PATH = Path(__file__).parent / "variables.db"
+from memory.db import DB_PATH, connect, init_db
 
 
 def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS variables "
-        "(key TEXT PRIMARY KEY, value TEXT NOT NULL)"
-    )
-    conn.commit()
-    return conn
+    init_db()
+    return connect()
 
 
 def set_variable(key: str, value: str) -> None:
