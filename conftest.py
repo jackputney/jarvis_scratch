@@ -7,7 +7,22 @@ the lazily-initialised table flags so the temp DB gets its schema created.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
+
+# Explicit path — find_dotenv() walks the call stack and breaks under heredocs / -c.
+_PROJECT_ROOT = Path(__file__).resolve().parent
+_ENV_FILE = _PROJECT_ROOT / ".env"
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _load_env_for_integration_tests():
+    """Load .env when present so ad-hoc integration checks see API keys."""
+    if _ENV_FILE.is_file():
+        from dotenv import load_dotenv
+
+        load_dotenv(_ENV_FILE, override=False)
 
 
 @pytest.fixture

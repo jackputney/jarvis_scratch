@@ -56,3 +56,9 @@ def test_config_post_updates(client):
 def test_message_requires_text(client):
     r = client.post("/api/message", json={})
     assert r.status_code == 400
+
+
+def test_interrupt_endpoint(client):
+    r = client.post("/api/interrupt")
+    assert r.status_code == 200
+    assert r.get_json()["ok"] is True

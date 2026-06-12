@@ -142,6 +142,12 @@ def create_app() -> Flask:
             "capped": result.get("capped", False),
         })
 
+    @app.route("/api/interrupt", methods=["POST"])
+    def api_interrupt():  # noqa: ANN202
+        import pipeline
+        pipeline.request_interrupt()
+        return jsonify({"ok": True})
+
     return app
 
 

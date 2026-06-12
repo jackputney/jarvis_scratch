@@ -123,6 +123,10 @@ async function sendMessage() {
 }
 $("talk-send").onclick = sendMessage;
 $("talk-input").addEventListener("keydown", (e) => { if (e.key === "Enter") sendMessage(); });
+$("talk-stop").onclick = async () => {
+  await sendJSON("/api/interrupt", "POST");
+  $("talk-reply").textContent = "Stopped.";
+};
 
 // ---- Variables --------------------------------------------------------
 async function loadVars() {

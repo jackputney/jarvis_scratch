@@ -91,6 +91,8 @@ button {
   cursor: pointer;
 }
 button:hover { filter: brightness(1.1); }
+button.danger { background: #2a1214; color: #ff6b6b; border: 1px solid #ff3b30; }
+button.danger:hover { filter: brightness(1.15); }
 button.ghost { background: transparent; color: var(--muted); border: 1px solid var(--stroke); }
 .hint { color: var(--muted); font-size: 12px; margin-left: 10px; }
 

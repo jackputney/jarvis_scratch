@@ -83,12 +83,16 @@ def _run_with_ui(cfg: Config) -> None:
     """Start the face widget on the main thread, pipeline on a daemon thread."""
     from PyQt6.QtWidgets import QApplication
     from ui.face import FaceWidget, JarvisState
-    from pipeline import run_pipeline
+    from pipeline import request_interrupt, run_pipeline
 
     app = QApplication(sys.argv)
+    app.setApplicationName("Jarvis")
+    app.setApplicationDisplayName("Jarvis")
+    app.setOrganizationName("Jarvis")
     app.setQuitOnLastWindowClosed(False)
 
     face = FaceWidget()
+    face.set_interrupt_callback(request_interrupt)
     face.show_overlay()
 
     stop_event = threading.Event()

@@ -9,13 +9,9 @@ ONE microphone stream is shared by the whole app (see _audio_loop): a single
 audio thread reads the mic and either feeds wake detection, routes frames into a
 capture queue for the recorder, or drains them (echo guard during think/speak).
 
-The query side is factored into process_query(), which both the voice loop and
-the dashboard's text box call. It enforces the daily budget before every Claude
-call (80% → one-time spoken warning, 100% → hard stop), times each call, logs exact
-token usage to costs.py, and records the exchange via events.py.
-
-Config is reloaded fresh each cycle so dashboard edits apply without a restart;
-changing the wake word transparently rebuilds the audio thread.
+Stop/interrupt is handled via request_interrupt() (UI Stop button, Escape,
+dashboard) which halts TTS and abandons the current cycle. Verbal barge-in was
+removed — it fought the mic during think/speak and caused false cut-offs.
 """
 
 from __future__ import annotations
@@ -23,6 +19,7 @@ from __future__ import annotations
 import logging
 import os
 import queue
+import re
 import threading
 import time
 from collections.abc import Callable
@@ -39,13 +36,12 @@ from config import Config
 from memory.knowledge import get_recent_notes
 from memory.variables import build_variables_block
 from tools.registry import TOOL_DEFINITIONS, dispatch_tool
-from tts.cartesia import speak
+from tts.cartesia import speak, stop_speech
 
 logger = logging.getLogger("jarvis.pipeline")
 
-# ---------------------------------------------------------------------------
-# Audio constants
-# ---------------------------------------------------------------------------
+_interrupt = threading.Event()
+_QUEUE_POLL_SEC = 0.25
 
 AUDIO_RATE = 16000
 FRAME_DURATION_MS = 30
@@ -60,37 +56,43 @@ PRE_ROLL_FRAMES = 8
 WAKE_THRESHOLD = 0.5
 AUDIO_THREAD_RESTART_DELAY = 2.0
 
-# Spoken budget messages.
 WARN_80_MESSAGE = "Heads up, I'm at 80 percent of today's budget."
 CAP_MESSAGE = "I've hit today's budget cap — raise it in the dashboard if you need me."
 
-# One-time 80% warning bookkeeping (resets each calendar day).
+
+def request_interrupt() -> None:
+    """Stop the current utterance and abandon the in-flight pipeline cycle."""
+    _interrupt.set()
+    stop_speech()
+    logger.info("⏹️  Stop requested — halting speech and resetting.")
+
+
+def interrupt_requested() -> bool:
+    return _interrupt.is_set()
+
+
+def _clear_interrupt() -> None:
+    _interrupt.clear()
+
+
 _warn_state: dict[str, Any] = {"date": None}
 
 
-# ---------------------------------------------------------------------------
-# Wake word model bootstrap (F2)
-# ---------------------------------------------------------------------------
-
 def _ensure_wake_model(wake_word: str) -> None:
-    """Ensure the openWakeWord ONNX model for `wake_word` is present on disk."""
     try:
         from openwakeword import MODELS
     except ImportError:
         return
-
     if wake_word not in MODELS:
         logger.warning(
             "⚠️  Wake word %r has no pretrained model. Available: %s",
             wake_word, ", ".join(sorted(MODELS.keys())),
         )
         return
-
     model_path = MODELS[wake_word]["model_path"]
     onnx_path = os.path.splitext(model_path)[0] + ".onnx"
     if os.path.exists(onnx_path):
         return
-
     download_name = os.path.splitext(os.path.basename(model_path))[0]
     logger.info("⬇️  First run: downloading wake word model %r…", download_name)
     try:
@@ -103,21 +105,10 @@ def _ensure_wake_model(wake_word: str) -> None:
         )
         logger.error(msg)
         raise RuntimeError(msg) from exc
-
     if not os.path.exists(onnx_path):
-        msg = (
-            f"❌  Wake model download finished but {onnx_path} is still missing — "
-            f"openWakeWord asset names may have changed."
-        )
-        logger.error(msg)
-        raise RuntimeError(msg)
-
+        raise RuntimeError(f"❌  Wake model missing after download: {onnx_path}")
     logger.info("✅  Wake word model ready: %s", os.path.basename(onnx_path))
 
-
-# ---------------------------------------------------------------------------
-# Shared audio thread: wake detection + frame routing
-# ---------------------------------------------------------------------------
 
 def _reset_oww(model: Any) -> None:
     try:
@@ -143,8 +134,6 @@ def _audio_loop(
     audio_stop: threading.Event,
     wake_word: str,
 ) -> None:
-    """Own the single mic stream and route frames by mode. Returns when
-    audio_stop is set; raises on hard failure so the supervisor can rebuild it."""
     import numpy as np
     from openwakeword.model import Model
 
@@ -183,6 +172,10 @@ def _audio_loop(
                 if scores[-1] > WAKE_THRESHOLD:
                     logger.info("🎙️  Wake word '%s' detected (score=%.2f)", name, scores[-1])
                     _reset_oww(oww_model)
+                    # Capture from this frame forward — do NOT replay pre-roll
+                    # (that included the wake phrase and made VAD end too early).
+                    capture_queue.put(data)
+                    capturing.set()
                     wake_event.set()
                     break
     finally:
@@ -199,15 +192,11 @@ def _start_audio_thread(
     audio_stop: threading.Event,
     wake_word: str,
 ) -> threading.Thread:
-    """Spawn the self-healing daemon thread that owns the mic."""
     def _run() -> None:
         try:
             import openwakeword.model  # noqa: F401
         except ImportError:
-            logger.warning(
-                "⚠️  openwakeword not installed — wake word disabled. "
-                "Press Enter to simulate a wake trigger."
-            )
+            logger.warning("⚠️  openwakeword not installed — wake word disabled.")
             while not audio_stop.is_set():
                 try:
                     input()
@@ -232,13 +221,7 @@ def _start_audio_thread(
     return t
 
 
-# ---------------------------------------------------------------------------
-# Utterance capture
-# ---------------------------------------------------------------------------
-
 def _record_from_queue(capture_queue: "queue.Queue[bytes]") -> bytes:
-    """Drain frames from the shared audio thread, trimming with VAD. Returns
-    b"" if no speech was detected within the wait window."""
     vad = webrtcvad.Vad(2)
     frames: list[bytes] = []
     silent_frames = 0
@@ -247,10 +230,18 @@ def _record_from_queue(capture_queue: "queue.Queue[bytes]") -> bytes:
 
     logger.info("🎙️  Listening…")
     for i in range(max_frames):
+        if _interrupt.is_set():
+            logger.info("⏹️  Stop during listening.")
+            return b""
+
         try:
-            data = capture_queue.get(timeout=MAX_RECORD_SECONDS)
+            data = capture_queue.get(timeout=_QUEUE_POLL_SEC)
         except queue.Empty:
-            break
+            if speech_started:
+                continue
+            if i >= WAIT_FOR_SPEECH_FRAMES:
+                break
+            continue
 
         is_speech = vad.is_speech(data, AUDIO_RATE)
         if is_speech:
@@ -266,17 +257,32 @@ def _record_from_queue(capture_queue: "queue.Queue[bytes]") -> bytes:
             frames.append(data)
             if len(frames) > PRE_ROLL_FRAMES:
                 frames.pop(0)
-            if i > WAIT_FOR_SPEECH_FRAMES:
-                break
 
     if not speech_started:
         return b""
     return b"".join(frames)
 
 
-# ---------------------------------------------------------------------------
-# Whisper transcription (mlx-whisper)
-# ---------------------------------------------------------------------------
+def strip_wake_phrase(text: str, wake_word: str) -> str:
+    """Remove a leading wake phrase from a Whisper transcript.
+
+    openWakeWord fires before the user's question, so Whisper often includes
+    the trigger ("hey Jarvis, …") in the transcript. Strip it so Claude sees
+    only the intent and logs stay readable.
+    """
+    if not text or not wake_word:
+        return text.strip()
+
+    parts = wake_word.replace("_", " ").split()
+    if not parts:
+        return text.strip()
+
+    between = r"[\s,.\-!?':;\u2014\u2013]+"
+    core = between.join(re.escape(part) for part in parts)
+    pattern = rf"^\s*{core}[\s,.\-!?':;\u2014\u2013]*"
+    cleaned = re.sub(pattern, "", text, count=1, flags=re.IGNORECASE).strip()
+    return cleaned
+
 
 def _transcribe(audio_bytes: bytes, cfg: Config) -> str:
     import mlx_whisper  # type: ignore[import]
@@ -285,14 +291,13 @@ def _transcribe(audio_bytes: bytes, cfg: Config) -> str:
     audio_np = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
     repo = f"mlx-community/whisper-{cfg.whisper_model}-mlx"
     result = mlx_whisper.transcribe(audio_np, path_or_hf_repo=repo)
-    text: str = result.get("text", "").strip()
+    raw: str = result.get("text", "").strip()
+    text = strip_wake_phrase(raw, cfg.wake_word)
+    if raw != text:
+        logger.debug("📝 Raw transcript (pre-strip): %r", raw)
     logger.info("📝 Heard: %r", text)
     return text
 
-
-# ---------------------------------------------------------------------------
-# System prompt builder
-# ---------------------------------------------------------------------------
 
 def _build_system_prompt(cfg: Config) -> str:
     variables_block = build_variables_block()
@@ -306,16 +311,7 @@ def _build_system_prompt(cfg: Config) -> str:
     )
 
 
-# ---------------------------------------------------------------------------
-# Claude call with tool loop — logs exact usage per call (costs.py)
-# ---------------------------------------------------------------------------
-
 def _call_claude(text: str, cfg: Config) -> tuple[str, str, float]:
-    """Run the Claude tool loop. Returns (reply_text, model, total_cost_usd).
-
-    Token usage is read from each response's `usage` field and logged via
-    costs.log_usage after every call — never estimated.
-    """
     client = anthropic.Anthropic(api_key=cfg.anthropic_api_key)
     model = cfg.claude_model_fast if cfg.route_to_fast_model(text) else cfg.claude_model_smart
     logger.info("🧠 Routing to %s", model)
@@ -346,7 +342,6 @@ def _call_claude(text: str, cfg: Config) -> tuple[str, str, float]:
             return reply_text.strip(), model, total_cost
 
         messages.append({"role": "assistant", "content": response.content})
-
         tool_results: list[dict[str, Any]] = []
         for tu in tool_uses:
             logger.info("🔧 Tool: %s(%s)", tu["name"], tu["input"])
@@ -357,18 +352,12 @@ def _call_claude(text: str, cfg: Config) -> tuple[str, str, float]:
                 "tool_use_id": tu["id"],
                 "content": result,
             })
-
         messages.append({"role": "user", "content": tool_results})
 
     return "I ran into an issue completing that. Please try again.", model, total_cost
 
 
-# ---------------------------------------------------------------------------
-# Budget enforcement + shared query path (voice loop AND dashboard text box)
-# ---------------------------------------------------------------------------
-
 def _should_warn_80() -> bool:
-    """Return True at most once per calendar day (for the 80% spoken warning)."""
     today = date.today().isoformat()
     if _warn_state["date"] == today:
         return False
@@ -377,7 +366,6 @@ def _should_warn_80() -> bool:
 
 
 def budget_level(cfg: Config) -> str:
-    """Return 'capped' | 'warn' | 'normal' for today's spend against the budget."""
     spend = costs.get_spend("today")
     if cfg.daily_budget_usd > 0 and spend >= cfg.daily_budget_usd:
         return "capped"
@@ -387,16 +375,7 @@ def budget_level(cfg: Config) -> str:
 
 
 def process_query(text: str, cfg: Config) -> dict:
-    """Run one query through budget enforcement + Claude, recording the exchange.
-
-    Returns a dict: {reply, warning, capped, model, latency_ms, cost}.
-    Budget rules (checked BEFORE the API call):
-      • spend ≥ 100% of daily budget → hard stop, no API call, cap message.
-      • spend ≥ 80% → one-time-per-day warning returned in `warning`.
-    There is deliberately no voice override of the hard stop.
-    """
     spend_today = costs.get_spend("today")
-
     if cfg.daily_budget_usd > 0 and spend_today >= cfg.daily_budget_usd:
         logger.warning("🛑 Daily budget cap reached ($%.2f) — skipping API call.", spend_today)
         events.record_conversation(text, CAP_MESSAGE, "(capped)", 0, 0.0)
@@ -417,10 +396,6 @@ def process_query(text: str, cfg: Config) -> dict:
             "model": model, "latency_ms": latency_ms, "cost": cost}
 
 
-# ---------------------------------------------------------------------------
-# Main pipeline loop
-# ---------------------------------------------------------------------------
-
 def run_pipeline(
     cfg: Config,
     state_callback: Callable[[str], None] | None = None,
@@ -428,16 +403,6 @@ def run_pipeline(
     is_muted: Callable[[], bool] | None = None,
     budget_callback: Callable[[str], None] | None = None,
 ) -> None:
-    """The main voice pipeline loop. Run this on a background daemon thread.
-
-    Args:
-        cfg:             Initial Config (reloaded fresh each cycle for hot-reload).
-        state_callback:  Optional callable(state_name) to update the UI orb.
-        stop_event:      If set, the loop exits.
-        is_muted:        Optional callable → True when muted (cycle is skipped).
-        budget_callback: Optional callable(level) where level is
-                         'normal' | 'warn' | 'capped' (drives the orb colour).
-    """
     def set_state(name: str) -> None:
         events.set_pipeline_state(name)
         if state_callback:
@@ -462,15 +427,14 @@ def run_pipeline(
     current_wake_word = cfg.wake_word
     _ensure_wake_model(current_wake_word)
     audio_thread = _start_audio_thread(
-        wake_event, capture_queue, capturing, paused, audio_stop, current_wake_word
+        wake_event, capture_queue, capturing, paused, audio_stop, current_wake_word,
     )
 
     try:
         while not (stop_event and stop_event.is_set()):
             try:
-                cfg = Config.load()  # hot-reload config each cycle
+                cfg = Config.load()
 
-                # Live wake-word change → rebuild the audio thread.
                 if cfg.wake_word != current_wake_word:
                     logger.info("🔁 Wake word changed to %r — rebuilding listener.", cfg.wake_word)
                     audio_stop.set()
@@ -478,25 +442,21 @@ def run_pipeline(
                     current_wake_word = cfg.wake_word
                     audio_stop = threading.Event()
                     audio_thread = _start_audio_thread(
-                        wake_event, capture_queue, capturing, paused, audio_stop, current_wake_word
+                        wake_event, capture_queue, capturing, paused, audio_stop, current_wake_word,
                     )
 
-                # Resurrect the audio thread if it died.
                 if audio_thread is not None and not audio_thread.is_alive():
                     logger.error("⚠️  Audio thread is dead — restarting it.")
                     audio_stop = threading.Event()
                     audio_thread = _start_audio_thread(
-                        wake_event, capture_queue, capturing, paused, audio_stop, current_wake_word
+                        wake_event, capture_queue, capturing, paused, audio_stop, current_wake_word,
                     )
 
                 if is_muted is not None:
                     events.set_muted(is_muted())
                 push_budget_level(cfg)
-
                 set_state("IDLE")
 
-                # Voice disabled via settings → keep loop alive (dashboard text
-                # still works) but don't listen.
                 if not cfg.wake_word_enabled:
                     paused.set()
                     time.sleep(0.5)
@@ -512,16 +472,23 @@ def run_pipeline(
 
                 if is_muted is not None and is_muted():
                     logger.info("🔇 Muted — ignoring wake word.")
+                    capturing.clear()
+                    _drain_queue(capture_queue)
                     continue
 
                 set_state("LISTENING")
-                _drain_queue(capture_queue)
-                capturing.set()
+                if not capturing.is_set():
+                    capturing.set()
                 audio_bytes = _record_from_queue(capture_queue)
 
                 paused.set()
                 capturing.clear()
                 _drain_queue(capture_queue)
+
+                if _interrupt.is_set():
+                    logger.info("⏹️  Cycle aborted after listening.")
+                    set_state("IDLE")
+                    continue
 
                 if len(audio_bytes) < FRAME_SIZE * SAMPLE_WIDTH * 3:
                     logger.info("⚠️  No speech captured — ignoring.")
@@ -532,6 +499,10 @@ def run_pipeline(
                     text = _transcribe(audio_bytes, cfg)
                 except Exception as exc:  # noqa: BLE001
                     logger.error("⚠️  Transcription failed: %s", exc, exc_info=True)
+                    continue
+
+                if _interrupt.is_set():
+                    set_state("IDLE")
                     continue
 
                 if not text:
@@ -545,8 +516,12 @@ def run_pipeline(
                     result = {"reply": "Sorry, I couldn't reach my brain. Please check your API key.",
                               "warning": None, "capped": False}
 
-                push_budget_level(cfg)
+                if _interrupt.is_set():
+                    logger.info("⏹️  Cycle aborted — skipping speech.")
+                    set_state("IDLE")
+                    continue
 
+                push_budget_level(cfg)
                 spoken = result["reply"]
                 if result.get("warning"):
                     spoken = result["warning"] + " " + spoken
@@ -555,6 +530,10 @@ def run_pipeline(
                 set_state("SPEAKING")
                 speak(spoken, voice_id=cfg.cartesia_voice_id)
 
+                if _interrupt.is_set():
+                    logger.info("⏹️  Speech interrupted.")
+                    set_state("IDLE")
+
             except Exception as exc:  # noqa: BLE001
                 logger.error("⚠️  Pipeline cycle failed: %s", exc, exc_info=True)
             finally:
@@ -562,6 +541,7 @@ def run_pipeline(
                 paused.clear()
                 wake_event.clear()
                 _drain_queue(capture_queue)
+                _clear_interrupt()
 
     finally:
         audio_stop.set()

@@ -51,6 +51,11 @@ WRITE_BYTES = WRITE_FRAMES * FRAME_BYTES
 # Hold ~120 ms of audio before the first write so the output buffer never underruns.
 PREBUFFER_BYTES = int(SAMPLE_RATE * SAMPLE_WIDTH * 0.12)
 
+# Set by stop_speech(); checked during playback so the user can interrupt mid-utterance.
+_cancel = threading.Event()
+_local_proc: subprocess.Popen[bytes] | None = None
+_local_lock = threading.Lock()
+
 
 # ---------------------------------------------------------------------------
 # PCM playback helpers
@@ -80,6 +85,19 @@ def iter_aligned_writes(chunks: Iterator[bytes], write_bytes: int = WRITE_BYTES)
         yield bytes(buffer[:tail])
 
 
+def stop_speech() -> None:
+    """Immediately halt any in-progress TTS (Cartesia stream or local say/pyttsx3)."""
+    _cancel.set()
+    with _local_lock:
+        proc = _local_proc
+    if proc is not None and proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=0.5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+
 def _play_pcm_stream(
     chunks: Iterator[bytes],
     on_first_chunk: Callable[[], None] | None = None,
@@ -93,6 +111,8 @@ def _play_pcm_stream(
     def _producer() -> None:
         try:
             for chunk in chunks:
+                if _cancel.is_set():
+                    break
                 audio_q.put(chunk)
         except Exception as exc:  # noqa: BLE001
             audio_q.put(exc)
@@ -112,6 +132,8 @@ def _play_pcm_stream(
 
     def _incoming() -> Iterator[bytes]:
         while True:
+            if _cancel.is_set():
+                return
             item = audio_q.get()
             if item is None:
                 return
@@ -125,6 +147,8 @@ def _play_pcm_stream(
 
     try:
         for chunk in _incoming():
+            if _cancel.is_set():
+                break
             buffer.extend(chunk)
 
             if not playback_started and len(buffer) >= PREBUFFER_BYTES:
@@ -134,6 +158,8 @@ def _play_pcm_stream(
                 continue
 
             while len(buffer) >= WRITE_BYTES:
+                if _cancel.is_set():
+                    break
                 frame = bytes(buffer[:WRITE_BYTES])
                 del buffer[:WRITE_BYTES]
                 if first_audio:
@@ -142,12 +168,12 @@ def _play_pcm_stream(
                         on_first_chunk()
                 stream.write(frame)
 
-        # Flush any remaining aligned samples.
-        tail = len(buffer) - (len(buffer) % FRAME_BYTES)
-        if tail:
-            if first_audio and on_first_chunk:
-                on_first_chunk()
-            stream.write(bytes(buffer[:tail]))
+        if not _cancel.is_set():
+            tail = len(buffer) - (len(buffer) % FRAME_BYTES)
+            if tail:
+                if first_audio and on_first_chunk:
+                    on_first_chunk()
+                stream.write(bytes(buffer[:tail]))
     finally:
         stream.stop_stream()
         stream.close()
@@ -158,17 +184,34 @@ def _play_pcm_stream(
 # ---------------------------------------------------------------------------
 
 def _speak_local(text: str) -> None:
-    """Speak text offline, blocking until playback finishes."""
+    """Speak text offline, blocking until playback finishes (or stop_speech())."""
+    global _local_proc
     if sys.platform == "darwin" and shutil.which("say"):
         try:
-            subprocess.run(
-                ["say", "-v", _MACOS_SAY_VOICE, "-r", "175", text],
-                check=True,
-            )
-            return
+            with _local_lock:
+                _local_proc = subprocess.Popen(
+                    ["say", "-v", _MACOS_SAY_VOICE, "-r", "175", text],
+                )
+            while True:
+                with _local_lock:
+                    proc = _local_proc
+                if proc is None:
+                    return
+                if proc.poll() is not None:
+                    return
+                if _cancel.is_set():
+                    proc.terminate()
+                    return
+                proc.wait(timeout=0.1)
         except Exception as exc:  # noqa: BLE001
             logger.warning("⚠️  macOS 'say' failed (%s) — trying pyttsx3", exc)
+        finally:
+            with _local_lock:
+                _local_proc = None
+        return
 
+    if _cancel.is_set():
+        return
     try:
         import pyttsx3
         engine = pyttsx3.init()
@@ -239,6 +282,8 @@ def speak(
     """Speak text aloud. Uses Cartesia when CARTESIA_API_KEY is set, else local TTS."""
     if not text or not text.strip():
         return
+
+    _cancel.clear()
 
     api_key = os.environ.get("CARTESIA_API_KEY", "")
     if api_key:

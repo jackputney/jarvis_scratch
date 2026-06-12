@@ -1,25 +1,28 @@
 """
-ui/face.py — PyQt6 floating orb face widget for Jarvis.
+ui/face.py — PyQt6 popup face window for Jarvis.
 
-A 300x300 frameless, always-on-top, transparent window lives in the top-right
-corner.  A single animated orb (deep sky blue, #00BFFF) reflects the pipeline
+A always-on-top popup panel (dark rounded box matching the dashboard theme)
+shows the animated orb plus a live status label. The orb reflects pipeline
 state:
 
-  IDLE      — static orb, no animation
-  LISTENING — slow breathing pulse (scale 0.9→1.1 over 1.5 s)
-  THINKING  — fast clockwise rotating arc around the orb
-  SPEAKING  — amplitude ripple rings expanding outward from the centre
+  IDLE      — static orb
+  LISTENING — slow breathing pulse
+  THINKING  — fast clockwise rotating arc
+  SPEAKING  — amplitude ripple rings
 
 State changes come from the pipeline thread via set_state(), which is safe to
 call from any thread — it posts to the Qt event loop via QMetaObject.invokeMethod.
 
-Clicking the orb toggles the global mute flag exposed as FaceWidget.muted.
+Click the orb to toggle mute. Drag anywhere on the panel chrome to reposition.
+Use the Stop button or Escape to interrupt Jarvis mid-response.
 """
 
 from __future__ import annotations
 
 import math
 from enum import Enum, auto
+
+from collections.abc import Callable
 
 from PyQt6.QtCore import (
     Q_ARG,
@@ -32,11 +35,27 @@ from PyQt6.QtCore import (
 from PyQt6.QtGui import (
     QBrush,
     QColor,
+    QFont,
+    QKeySequence,
     QPainter,
     QPen,
     QRadialGradient,
+    QShortcut,
 )
-from PyQt6.QtWidgets import QApplication, QWidget
+from PyQt6.QtWidgets import QApplication, QLabel, QPushButton, QVBoxLayout, QWidget
+
+# Match the dashboard palette.
+PANEL_BG = QColor("#0a0e14")
+PANEL_BORDER = QColor("#00BFFF")
+PANEL_INNER = QColor("#111722")
+TEXT_COLOUR = QColor("#d7e0ea")
+MUTED_TEXT = QColor("#7c8a9a")
+ACCENT = QColor("#00BFFF")
+
+PANEL_W = 320
+PANEL_H = 440
+ORB_SIZE = 260
+CORNER_RADIUS = 16
 
 
 class JarvisState(Enum):
@@ -44,6 +63,14 @@ class JarvisState(Enum):
     LISTENING = auto()
     THINKING = auto()
     SPEAKING = auto()
+
+
+_STATE_LABELS = {
+    JarvisState.IDLE: "Ready",
+    JarvisState.LISTENING: "Listening…",
+    JarvisState.THINKING: "Thinking…",
+    JarvisState.SPEAKING: "Speaking…",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -54,16 +81,13 @@ class OrbWidget(QWidget):
     """The animated orb canvas. Drawn entirely in paintEvent."""
 
     ORB_COLOUR = QColor("#00BFFF")
-    WARN_COLOUR = QColor("#FFB000")   # amber — daily spend ≥ 80%
-    CAPPED_COLOUR = QColor("#FF3B30")  # red — daily budget reached
+    WARN_COLOUR = QColor("#FFB000")
+    CAPPED_COLOUR = QColor("#FF3B30")
     MUTED_COLOUR = QColor("#888888")
-    GLOW_COLOUR = QColor(0, 191, 255, 60)
     ARC_COLOUR = QColor("#00BFFF")
-    RING_COLOUR = QColor(0, 191, 255, 120)
     BG_COLOUR = QColor(0, 0, 0, 0)
 
     def _base_colour(self) -> QColor:
-        """Pick the orb colour by priority: capped > warn > muted > normal."""
         if self.budget_level == "capped":
             return self.CAPPED_COLOUR
         if self.budget_level == "warn":
@@ -76,30 +100,23 @@ class OrbWidget(QWidget):
         super().__init__(parent)
         self.state: JarvisState = JarvisState.IDLE
         self.muted: bool = False
-        # Budget level drives the orb colour: 'normal' (blue), 'warn' (amber),
-        # 'capped' (red). Set from the pipeline via FaceWidget.set_budget_level.
         self.budget_level: str = "normal"
 
-        self._tick: int = 0  # animation frame counter
-        self._rings: list[float] = []  # ring radii for SPEAKING ripple
+        self._tick: int = 0
+        self._rings: list[float] = []
 
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._on_tick)
-        self._timer.start(16)  # ~60 fps
+        self._timer.start(16)
 
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setMouseTracking(True)
 
     def _on_tick(self) -> None:
         self._tick += 1
-
         if self.state == JarvisState.SPEAKING:
-            # Spawn a new ring every ~20 frames
             if self._tick % 20 == 0:
                 self._rings.append(0.0)
-            # Expand and expire rings
             self._rings = [r + 2.5 for r in self._rings if r < 120]
-
         self.update()
 
     def set_state(self, state: JarvisState) -> None:
@@ -113,12 +130,12 @@ class OrbWidget(QWidget):
         dx = event.position().x() - cx
         dy = event.position().y() - cy
         if dx * dx + dy * dy <= r * r:
-            # Click landed on the orb → toggle mute and consume the event.
             self.muted = not self.muted
             self.update()
+            face = self.parent()
+            if face is not None and hasattr(face, "_refresh_status_label"):
+                face._refresh_status_label()
         else:
-            # Outside the orb → let the parent FaceWidget handle it so the
-            # window can be dragged (F9).
             event.ignore()
 
     def paintEvent(self, _event) -> None:  # noqa: ANN001
@@ -128,28 +145,20 @@ class OrbWidget(QWidget):
 
         w, h = self.width(), self.height()
         cx, cy = w / 2.0, h / 2.0
-        base_r = min(w, h) * 0.30  # base orb radius (30% of smallest dimension)
-
-        # ----- State-specific modifiers ----------------------------------------
+        base_r = min(w, h) * 0.30
 
         scale = 1.0
         arc_angle: float | None = None
 
         if self.state == JarvisState.LISTENING:
-            # Breathing: sinusoidal scale between 0.9 and 1.1, period ~90 frames
             scale = 1.0 + 0.1 * math.sin(self._tick * (2 * math.pi / 90))
-
         elif self.state == JarvisState.THINKING:
-            # Rotating arc — we'll draw it after the orb
-            arc_angle = (self._tick * 4) % 360  # 4° per frame
-
+            arc_angle = (self._tick * 4) % 360
         elif self.state == JarvisState.SPEAKING:
-            # Gentle pulse on the orb itself
             scale = 1.0 + 0.05 * math.sin(self._tick * (2 * math.pi / 20))
 
         r = base_r * scale
 
-        # ----- Glow halo -------------------------------------------------------
         glow_gradient = QRadialGradient(QPointF(cx, cy), r * 1.8)
         glow_gradient.setColorAt(0.0, QColor(0, 191, 255, 80))
         glow_gradient.setColorAt(1.0, QColor(0, 0, 0, 0))
@@ -157,7 +166,6 @@ class OrbWidget(QWidget):
         painter.setBrush(QBrush(glow_gradient))
         painter.drawEllipse(QPointF(cx, cy), r * 1.8, r * 1.8)
 
-        # ----- Orb body --------------------------------------------------------
         orb_gradient = QRadialGradient(QPointF(cx - r * 0.25, cy - r * 0.25), r * 1.2)
         orb_colour = self._base_colour()
         orb_gradient.setColorAt(0.0, orb_colour.lighter(160))
@@ -165,7 +173,6 @@ class OrbWidget(QWidget):
         painter.setBrush(QBrush(orb_gradient))
         painter.drawEllipse(QPointF(cx, cy), r, r)
 
-        # ----- THINKING: rotating arc ------------------------------------------
         if arc_angle is not None:
             pen = QPen(self.ARC_COLOUR)
             pen.setWidth(3)
@@ -176,7 +183,6 @@ class OrbWidget(QWidget):
             rect_x = cx - arc_r
             rect_y = cy - arc_r
             rect_size = arc_r * 2
-            # drawArc uses 1/16th-degree units; sweep 120°
             start_angle = int((90 - arc_angle) * 16)
             sweep_angle = int(120 * 16)
             painter.drawArc(
@@ -184,7 +190,6 @@ class OrbWidget(QWidget):
                 start_angle, sweep_angle,
             )
 
-        # ----- SPEAKING: ripple rings ------------------------------------------
         if self.state == JarvisState.SPEAKING:
             for ring_r in self._rings:
                 alpha = max(0, int(120 * (1 - ring_r / 120)))
@@ -198,47 +203,131 @@ class OrbWidget(QWidget):
 
 
 # ---------------------------------------------------------------------------
-# Face window
+# Popup face window
 # ---------------------------------------------------------------------------
 
 class FaceWidget(QWidget):
-    """Frameless, always-on-top host window for the orb."""
+    """Always-on-top popup panel with the Jarvis orb and status readout."""
 
     def __init__(self) -> None:
         super().__init__()
-        # NOTE: deliberately NOT using Qt.Tool here. On macOS a Tool window is an
-        # accessory palette that is hidden whenever its app isn't frontmost — so
-        # while you're typing in the terminal the orb would vanish. Frameless +
-        # WindowStaysOnTopHint keeps it visible above everything regardless of
-        # which app has focus.
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.Window,
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        # Show without stealing focus from whatever the user is doing.
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
-        self.setFixedSize(300, 300)
+        self.setFixedSize(PANEL_W, PANEL_H)
         self.setWindowTitle("Jarvis")
 
-        self._orb = OrbWidget(self)
-        self._orb.setGeometry(0, 0, 300, 300)
+        self._drag_pos: QPointF | None = None
+        self._current_state = JarvisState.IDLE
+        self._interrupt_cb: Callable[[], None] | None = None
 
-        # Position in top-right of the primary screen
+        # --- Layout (labels sit on top of the painted panel) ----------------
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 18, 20, 16)
+        layout.setSpacing(6)
+
+        self._title = QLabel("JARVIS")
+        title_font = QFont()
+        title_font.setPointSize(13)
+        title_font.setBold(True)
+        title_font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 3)
+        self._title.setFont(title_font)
+        self._title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._title.setStyleSheet(f"color: {ACCENT.name()}; background: transparent;")
+
+        self._orb = OrbWidget(self)
+        self._orb.setFixedSize(ORB_SIZE, ORB_SIZE)
+
+        self._status = QLabel(_STATE_LABELS[JarvisState.IDLE])
+        status_font = QFont()
+        status_font.setPointSize(11)
+        self._status.setFont(status_font)
+        self._status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._status.setStyleSheet(f"color: {TEXT_COLOUR.name()}; background: transparent;")
+
+        self._hint = QLabel("Click orb to mute · Stop button or Esc to interrupt")
+        hint_font = QFont()
+        hint_font.setPointSize(9)
+        self._hint.setFont(hint_font)
+        self._hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._hint.setStyleSheet(f"color: {MUTED_TEXT.name()}; background: transparent;")
+
+        self._stop_btn = QPushButton("Stop")
+        self._stop_btn.setFixedHeight(34)
+        self._stop_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._stop_btn.setStyleSheet(
+            "QPushButton {"
+            f"  background-color: #2a1214;"
+            f"  color: #ff6b6b;"
+            f"  border: 1px solid #ff3b30;"
+            "  border-radius: 8px;"
+            "  font-weight: 600;"
+            "  padding: 4px 12px;"
+            "}"
+            "QPushButton:hover { background-color: #3d1818; }"
+            "QPushButton:pressed { background-color: #1a0a0a; }"
+        )
+        self._stop_btn.clicked.connect(self._on_stop)
+
+        layout.addWidget(self._title)
+        layout.addWidget(self._orb, alignment=Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self._status)
+        layout.addWidget(self._stop_btn)
+        layout.addWidget(self._hint)
+
+        QShortcut(QKeySequence(Qt.Key.Key_Escape), self, self._on_stop)
+
+        # Top-right of the primary screen, offset so it feels like a popup.
         screen = QApplication.primaryScreen()
         if screen:
             geom = screen.availableGeometry()
-            self.move(geom.right() - 320, geom.top() + 20)
+            self.move(geom.right() - PANEL_W - 24, geom.top() + 48)
 
-        # Dragging support
-        self._drag_pos: QPointF | None = None
+    def paintEvent(self, _event) -> None:  # noqa: ANN001
+        """Draw the rounded dark panel + accent border behind the widgets."""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        rect = self.rect().adjusted(1, 1, -1, -1)
+
+        # Soft outer glow.
+        glow_pen = QPen(QColor(0, 191, 255, 40))
+        glow_pen.setWidth(6)
+        painter.setPen(glow_pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(rect, CORNER_RADIUS + 2, CORNER_RADIUS + 2)
+
+        # Panel fill.
+        painter.setPen(QPen(PANEL_BORDER, 1.5))
+        painter.setBrush(QBrush(PANEL_BG))
+        painter.drawRoundedRect(rect, CORNER_RADIUS, CORNER_RADIUS)
+
+        # Inner inset for depth.
+        inner = rect.adjusted(8, 8, -8, -8)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(PANEL_INNER))
+        painter.drawRoundedRect(inner, CORNER_RADIUS - 4, CORNER_RADIUS - 4)
+
+        painter.end()
+
+    def set_interrupt_callback(self, callback: Callable[[], None]) -> None:
+        """Wire the Stop button / Escape key to pipeline.request_interrupt()."""
+        self._interrupt_cb = callback
+
+    def _on_stop(self) -> None:
+        if self._interrupt_cb:
+            self._interrupt_cb()
+        self._status.setText("Stopped")
 
     def show_overlay(self) -> None:
-        """Show the orb and lift it above other windows (call from main thread)."""
+        """Show the popup and lift it above other windows (call from main thread)."""
         self.show()
         self.raise_()
-
-    # ---- Thread-safe state update -------------------------------------------
+        self.activateWindow()
 
     @pyqtSlot(str)
     def _apply_state(self, state_name: str) -> None:
@@ -246,15 +335,12 @@ class FaceWidget(QWidget):
             state = JarvisState[state_name]
         except KeyError:
             return
+        self._current_state = state
         self._orb.set_state(state)
+        self._refresh_status_label()
 
     def set_state(self, state: JarvisState) -> None:
-        """Safe to call from any thread. Posts to the Qt event loop.
-
-        The state name must be wrapped in Q_ARG — PyQt6's invokeMethod does not
-        auto-convert bare Python objects to the QGenericArgument the C++ slot
-        expects, and passing a raw str raises TypeError.
-        """
+        """Safe to call from any thread."""
         QMetaObject.invokeMethod(
             self,
             "_apply_state",
@@ -280,7 +366,11 @@ class FaceWidget(QWidget):
     def muted(self) -> bool:
         return self._orb.muted
 
-    # ---- Drag-to-move -------------------------------------------------------
+    def _refresh_status_label(self) -> None:
+        label = _STATE_LABELS.get(self._current_state, self._current_state.name.title())
+        if self._orb.muted:
+            label = f"{label}  (muted)"
+        self._status.setText(label)
 
     def mousePressEvent(self, event) -> None:  # noqa: ANN001
         if event.button() == Qt.MouseButton.LeftButton:

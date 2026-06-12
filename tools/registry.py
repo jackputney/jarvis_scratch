@@ -111,6 +111,9 @@ TOOL_DISPATCH: dict[str, callable] = {
     "read_note": lambda **kw: (read_note(kw["title"]) or f"No note found for '{kw['title']}'."),
 }
 
+# Read-only tools run immediately — never block the voice loop on terminal input.
+READ_ONLY_TOOLS = frozenset({"get_variable", "read_note", "web_search"})
+
 
 def dispatch_tool(name: str, inputs: dict, confirm: bool = False) -> str:
     """Execute a tool by name with the given inputs dict.
@@ -124,11 +127,9 @@ def dispatch_tool(name: str, inputs: dict, confirm: bool = False) -> str:
     if name not in TOOL_DISPATCH:
         return f"Unknown tool: {name}"
 
-    if confirm:
-        # NOTE: confirm mode requires an interactive terminal. When launched
-        # without a TTY (e.g. via launchd or a packaged .app), input() raises
-        # EOFError immediately — we treat that as a denial and refuse to run
-        # the tool rather than crashing or silently executing it.
+    if confirm and name not in READ_ONLY_TOOLS:
+        # Mutating tools (open_app, set_variable, write_note) need explicit approval.
+        # Read-only lookups must never block the voice loop waiting for Enter.
         print(f"\n⚙️  Tool call: {name}({inputs})")
         try:
             input("   Press Enter to allow, Ctrl+C to cancel… ")
