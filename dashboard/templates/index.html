@@ -7,100 +7,183 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
 </head>
 <body>
-  <header class="topbar">
-    <div class="brand"><span class="dot" id="state-dot"></span> Jarvis</div>
-    <div class="status">
-      <span id="state-label">IDLE</span>
-      <span class="sep">·</span>
-      <span id="mute-label">unmuted</span>
-      <span class="sep">·</span>
-      <span id="uptime">up 0s</span>
-      <span class="sep">·</span>
-      <span id="models">—</span>
+  <div class="aurora" aria-hidden="true"></div>
+
+  <div class="app">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="logo">
+        <span class="logo-orb" id="logo-orb"></span>
+        <span class="logo-text">JARVIS</span>
+      </div>
+      <nav class="nav">
+        <button class="nav-item active" data-view="overview"><span class="nav-ico">📊</span><span>Overview</span></button>
+        <button class="nav-item" data-view="tools"><span class="nav-ico">🛠️</span><span>Tools</span></button>
+        <button class="nav-item" data-view="memory"><span class="nav-ico">🧠</span><span>Memory</span></button>
+        <button class="nav-item" data-view="settings"><span class="nav-ico">⚙️</span><span>Settings</span></button>
+      </nav>
+      <div class="sidebar-foot">
+        <div class="mini-stat"><span class="mini-label">today</span><span class="mini-val" id="side-spend-today">$0.00</span></div>
+        <div class="mini-stat"><span class="mini-label">uptime</span><span class="mini-val" id="side-uptime">0s</span></div>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <div class="main">
+      <header class="topbar">
+        <div class="state-pill" id="state-pill">
+          <span class="dot" id="state-dot"></span>
+          <span id="state-label">Idle</span>
+        </div>
+        <div class="topbar-meta">
+          <span class="chip" id="mute-chip"><span id="mute-label">unmuted</span></span>
+          <span class="chip" id="models-chip" title="fast / smart models">🧠 <span id="models">—</span></span>
+          <span class="chip" id="uptime-chip">⏱️ <span id="uptime">up 0s</span></span>
+        </div>
+      </header>
+
+      <div class="views">
+        <!-- ============ OVERVIEW ============ -->
+        <section class="view active" data-view="overview">
+          <div class="grid">
+            <section class="card spend-card">
+              <div class="card-head"><h2>Spend</h2><span class="card-sub" id="budget-state-tag"></span></div>
+              <div class="spend-row">
+                <div class="stat"><div class="value" id="spend-today">$0.00</div><div class="label">today</div></div>
+                <div class="stat"><div class="value" id="spend-week">$0.00</div><div class="label">week</div></div>
+                <div class="stat"><div class="value" id="spend-month">$0.00</div><div class="label">month</div></div>
+              </div>
+              <div class="bar-wrap"><div class="bar" id="budget-bar"></div></div>
+              <div class="bar-caption" id="budget-caption">0% of daily budget</div>
+              <div class="budget-edit">
+                <label>Daily $ <input type="number" step="0.5" id="daily-budget" /></label>
+                <label>Monthly $ <input type="number" step="1" id="monthly-budget" /></label>
+                <button id="save-budget">Save</button>
+              </div>
+            </section>
+
+            <section class="card activity-card">
+              <div class="card-head"><h2>Live activity</h2><span class="card-sub">real-time</span></div>
+              <ul class="activity" id="activity-feed"></ul>
+            </section>
+
+            <section class="card wide log-card">
+              <div class="card-head"><h2>Conversation log</h2><span class="card-sub" id="log-count"></span></div>
+              <div class="table-wrap">
+                <table class="log">
+                  <thead><tr><th>Heard</th><th>Response</th><th>Model</th><th class="num">ms</th><th class="num">$</th></tr></thead>
+                  <tbody id="log-body"></tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <!-- ============ TOOLS ============ -->
+        <section class="view" data-view="tools">
+          <div class="tools-head">
+            <div>
+              <h1>Tools</h1>
+              <p class="sub">Operate any of Jarvis's tools directly. Read-only tools are safe to run anytime; high-risk tools act on the real world.</p>
+            </div>
+            <div class="tools-filter" id="tools-filter">
+              <button class="pill active" data-filter="all">All</button>
+              <button class="pill" data-filter="read">Read-only</button>
+              <button class="pill" data-filter="write">Write</button>
+              <button class="pill" data-filter="high">High-risk</button>
+            </div>
+          </div>
+          <div class="tools-gallery" id="tools-gallery"></div>
+        </section>
+
+        <!-- ============ MEMORY ============ -->
+        <section class="view" data-view="memory">
+          <div class="grid">
+            <section class="card">
+              <div class="card-head"><h2>Variables</h2><span class="card-sub" id="vars-count"></span></div>
+              <table class="kv"><tbody id="vars-body"></tbody></table>
+              <div class="kv-add">
+                <input type="text" id="var-key" placeholder="key" />
+                <input type="text" id="var-value" placeholder="value" />
+                <button id="var-add">Add</button>
+              </div>
+            </section>
+
+            <section class="card">
+              <div class="card-head"><h2>Notes</h2><span class="card-sub" id="notes-count"></span></div>
+              <ul class="notes" id="notes-list"></ul>
+              <div class="note-edit">
+                <input type="text" id="note-title" placeholder="title" />
+                <textarea id="note-content" placeholder="content…"></textarea>
+                <button id="note-save">Save note</button>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <!-- ============ SETTINGS ============ -->
+        <section class="view" data-view="settings">
+          <div class="grid">
+            <section class="card wide">
+              <div class="card-head"><h2>Settings</h2><span class="card-sub">applies live — no restart</span></div>
+              <div class="settings-grid">
+                <label class="toggle"><input type="checkbox" id="set-wake-enabled" /> <span>Wake word on</span></label>
+                <label class="toggle"><input type="checkbox" id="set-confirm" /> <span>Confirm before tool execute</span></label>
+                <label>Whisper model <input type="text" id="set-whisper" placeholder="tiny or small" /></label>
+                <label>Routing threshold <input type="number" id="set-threshold" /></label>
+                <label>Fast model <input type="text" id="set-fast" /></label>
+                <label>Smart model <input type="text" id="set-smart" /></label>
+                <label>Wake word <input type="text" id="set-wakeword" /></label>
+                <label>TTS voice id <input type="text" id="set-voice" /></label>
+              </div>
+              <button id="save-settings">Save settings</button>
+            </section>
+          </div>
+        </section>
+      </div>
     </div>
-  </header>
+  </div>
 
-  <main class="grid">
-    <!-- Spend -->
-    <section class="card" id="spend-card">
-      <h2>Spend</h2>
-      <div class="spend-row">
-        <div class="stat"><div class="value" id="spend-today">$0.00</div><div class="label">today</div></div>
-        <div class="stat"><div class="value" id="spend-week">$0.00</div><div class="label">week</div></div>
-        <div class="stat"><div class="value" id="spend-month">$0.00</div><div class="label">month</div></div>
+  <!-- Persistent command dock -->
+  <div class="command-dock">
+    <span class="dock-glyph">⌘</span>
+    <input type="text" id="talk-input" placeholder="Message Jarvis…  (Enter to send)" />
+    <div class="dock-reply" id="talk-reply"></div>
+    <button id="talk-send" class="primary">Send</button>
+    <button id="talk-stop" class="danger">Stop</button>
+  </div>
+
+  <!-- Toasts -->
+  <div id="toasts" class="toasts"></div>
+
+  <!-- Tool run drawer -->
+  <div id="tool-drawer" class="drawer hidden" role="dialog" aria-modal="true">
+    <div class="drawer-scrim" id="drawer-scrim"></div>
+    <div class="drawer-panel">
+      <div class="drawer-head">
+        <div>
+          <span class="tool-badge" id="drawer-badge"></span>
+          <h2 id="drawer-title">Tool</h2>
+          <p class="drawer-desc" id="drawer-desc"></p>
+        </div>
+        <button class="icon-btn" id="drawer-close" aria-label="Close">✕</button>
       </div>
-      <div class="bar-wrap"><div class="bar" id="budget-bar"></div></div>
-      <div class="bar-caption" id="budget-caption">0% of daily budget</div>
-      <div class="budget-edit">
-        <label>Daily $ <input type="number" step="0.5" id="daily-budget" /></label>
-        <label>Monthly $ <input type="number" step="1" id="monthly-budget" /></label>
-        <button id="save-budget">Save</button>
+      <form class="drawer-form" id="tool-form" autocomplete="off"></form>
+      <div class="drawer-actions">
+        <button type="button" class="ghost" id="drawer-cancel">Cancel</button>
+        <button type="button" class="primary" id="drawer-run">Run tool</button>
       </div>
-    </section>
-
-    <!-- Settings -->
-    <section class="card" id="settings-card">
-      <h2>Settings</h2>
-      <div class="settings-grid">
-        <label class="toggle"><input type="checkbox" id="set-wake-enabled" /> Wake word on</label>
-        <label class="toggle"><input type="checkbox" id="set-confirm" /> Confirm before tool execute</label>
-        <label>Whisper model <input type="text" id="set-whisper" placeholder="tiny or small" /></label>
-        <label>Fast model <input type="text" id="set-fast" /></label>
-        <label>Smart model <input type="text" id="set-smart" /></label>
-        <label>Routing threshold <input type="number" id="set-threshold" /></label>
-        <label>Wake word <input type="text" id="set-wakeword" /></label>
-        <label>TTS voice id <input type="text" id="set-voice" /></label>
+      <div class="drawer-result hidden" id="drawer-result">
+        <div class="result-head"><span id="result-status"></span><button class="ghost tiny" id="result-copy">Copy</button></div>
+        <pre id="result-body"></pre>
       </div>
-      <button id="save-settings">Save settings</button>
-      <span class="hint">Applies live — no restart.</span>
-    </section>
+    </div>
+  </div>
 
-    <!-- Talk -->
-    <section class="card" id="talk-card">
-      <h2>Talk to Jarvis</h2>
-      <div class="talk-row">
-        <input type="text" id="talk-input" placeholder="Type a message…" />
-        <button id="talk-send">Send</button>
-        <button id="talk-stop" class="danger">Stop</button>
-      </div>
-      <div class="talk-reply" id="talk-reply"></div>
-    </section>
-
-    <!-- Conversation log -->
-    <section class="card wide" id="log-card">
-      <h2>Conversation log</h2>
-      <table class="log">
-        <thead><tr><th>Heard</th><th>Response</th><th>Model</th><th>ms</th><th>$</th></tr></thead>
-        <tbody id="log-body"></tbody>
-      </table>
-    </section>
-
-    <!-- Variables -->
-    <section class="card" id="vars-card">
-      <h2>Memory · variables</h2>
-      <table class="kv"><tbody id="vars-body"></tbody></table>
-      <div class="kv-add">
-        <input type="text" id="var-key" placeholder="key" />
-        <input type="text" id="var-value" placeholder="value" />
-        <button id="var-add">Add</button>
-      </div>
-    </section>
-
-    <!-- Notes -->
-    <section class="card" id="notes-card">
-      <h2>Memory · notes</h2>
-      <ul class="notes" id="notes-list"></ul>
-      <div class="note-edit">
-        <input type="text" id="note-title" placeholder="title" />
-        <textarea id="note-content" placeholder="content…"></textarea>
-        <button id="note-save">Save note</button>
-      </div>
-    </section>
-  </main>
-
+  <!-- Tool confirm modal (voice / gated tools) -->
   <div id="confirm-overlay" class="confirm-overlay hidden" role="dialog" aria-modal="true">
     <div class="confirm-card">
-      <h2>Allow tool?</h2>
+      <h2>⚠️ Approval needed</h2>
       <p class="confirm-tool" id="confirm-tool"></p>
       <pre class="confirm-inputs" id="confirm-inputs"></pre>
       <p class="confirm-timer" id="confirm-timer"></p>

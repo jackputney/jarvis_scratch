@@ -11,6 +11,8 @@ Endpoints:
   GET  /                  → the dashboard page
   GET  /api/state         → pipeline state, mute, uptime, models, spend, log
   GET  /api/events        → Server-Sent Events stream of job/pipeline events
+  GET  /api/tools         → tool definitions + risk tier (read/write/high)
+  POST /api/tools/run     → {name, inputs} → execute a tool directly, return result
   POST /api/config        → update editable settings/budgets (writes config.json)
   GET  /api/variables     → all memory variables
   POST /api/variables     → add/edit a variable {key, value}
@@ -150,6 +152,55 @@ def create_app() -> Flask:
         changes = request.get_json(silent=True) or {}
         cfg = Config.update_persisted(changes)
         return jsonify({"ok": True, "config": cfg.to_persisted_dict()})
+
+    # -- Tools: list + run directly from the dashboard ---------------------
+    @app.route("/api/tools")
+    def api_tools():  # noqa: ANN202
+        from tools.registry import (
+            AUTO_ALLOW_TOOLS,
+            CONFIRM_REQUIRED_TOOLS,
+            READ_ONLY_TOOLS,
+            TOOL_DEFINITIONS,
+        )
+
+        def tier(name: str) -> str:
+            if name in CONFIRM_REQUIRED_TOOLS:
+                return "high"
+            if name in READ_ONLY_TOOLS:
+                return "read"
+            if name in AUTO_ALLOW_TOOLS:
+                return "write"
+            return "write"
+
+        tools = [{**defn, "tier": tier(defn["name"])} for defn in TOOL_DEFINITIONS]
+        return jsonify({"tools": tools})
+
+    @app.route("/api/tools/run", methods=["POST"])
+    def api_tools_run():  # noqa: ANN202
+        body = request.get_json(silent=True) or {}
+        name = (body.get("name") or "").strip()
+        inputs = body.get("inputs") or {}
+        if not name:
+            return jsonify({"ok": False, "error": "name is required"}), 400
+        if not isinstance(inputs, dict):
+            return jsonify({"ok": False, "error": "inputs must be an object"}), 400
+
+        from tools.registry import TOOL_DISPATCH, dispatch_tool
+
+        if name not in TOOL_DISPATCH:
+            return jsonify({"ok": False, "error": f"Unknown tool: {name}"}), 404
+
+        # A dashboard run is an explicit user action — it IS the confirmation, so
+        # the voice-mode confirm gate is bypassed here.
+        result = dispatch_tool(name, inputs, confirm=False)
+        failed = result.startswith("Tool error") or result.startswith("Unknown tool")
+        try:
+            from orchestrator.runtime import get_bus
+
+            get_bus().emit("tool.run", name=name, ok=not failed)
+        except Exception:  # noqa: BLE001
+            logger.debug("tool.run bus emit failed", exc_info=True)
+        return jsonify({"ok": not failed, "name": name, "result": result})
 
     # -- Memory: variables --------------------------------------------------
     @app.route("/api/variables", methods=["GET"])

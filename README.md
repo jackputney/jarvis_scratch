@@ -27,7 +27,10 @@ Then say **"hey Jarvis"** to activate and watch the orb in the top-right corner.
 
 A localhost-only Flask panel at **http://127.0.0.1:7777** (started automatically, no extra process):
 
-- **Status bar** — pipeline state, mute, uptime, active models.
+- **Sidebar nav** — Overview, Tools, Memory, Settings, with a persistent command dock (type to Jarvis from any view) and live toasts.
+- **Tools** — operate any of Jarvis's tools directly: a gallery grouped by risk tier (read-only / write / high-risk) with a schema-driven run drawer. High-risk tools (`send_email`, sheet writes) require a deliberate second click before they act for real.
+- **Status bar** — pipeline state (animated), mute, uptime, active models.
+- **Live activity** — real-time feed of voice turns, dashboard messages, and tool runs over SSE.
 - **Spend** — today / week / month vs budget, with a daily-budget bar. Budgets editable inline.
 - **Conversation log** — last 50 exchanges with model, latency, and cost.
 - **Memory** — edit variables and notes (add / edit / delete).

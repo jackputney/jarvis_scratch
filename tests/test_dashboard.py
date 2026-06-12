@@ -105,6 +105,36 @@ def test_message_busy_returns_409(client, temp_env, monkeypatch):
     assert r.get_json()["busy"] is True
 
 
+def test_tools_list_includes_tiers(client):
+    tools = client.get("/api/tools").get_json()["tools"]
+    names = {t["name"] for t in tools}
+    assert {"send_email", "web_search", "get_variable"} <= names
+    by_name = {t["name"]: t for t in tools}
+    assert by_name["send_email"]["tier"] == "high"
+    assert by_name["web_search"]["tier"] == "read"
+    assert by_name["set_variable"]["tier"] == "write"
+    assert "input_schema" in by_name["send_email"]
+
+
+def test_tool_run_set_then_get(client, temp_env):
+    r = client.post("/api/tools/run", json={"name": "set_variable", "inputs": {"key": "city", "value": "London"}})
+    assert r.status_code == 200
+    assert r.get_json()["ok"] is True
+    r2 = client.post("/api/tools/run", json={"name": "get_variable", "inputs": {"key": "city"}})
+    assert "London" in r2.get_json()["result"]
+
+
+def test_tool_run_unknown_returns_404(client):
+    r = client.post("/api/tools/run", json={"name": "does_not_exist", "inputs": {}})
+    assert r.status_code == 404
+    assert r.get_json()["ok"] is False
+
+
+def test_tool_run_requires_name(client):
+    r = client.post("/api/tools/run", json={"inputs": {}})
+    assert r.status_code == 400
+
+
 def test_message_happy_path_returns_reply(client, temp_env, monkeypatch):
     import pipeline
 
