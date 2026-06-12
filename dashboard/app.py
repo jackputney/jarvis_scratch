@@ -2,12 +2,15 @@
 dashboard/app.py — localhost Flask control panel for Jarvis.
 
 Everything binds to 127.0.0.1 only. The app is intentionally tiny: one template,
-one CSS file, vanilla JS polling /api/state every 2 s. No build step, no React,
-no websockets.
+one CSS file, vanilla JS. No build step, no React. State pushes over a Server-Sent
+Events stream (/api/events) fed by the orchestrator bus; a slow poll is the
+fallback. Text messages and Stop go through the shared orchestrator queue so the
+dashboard and the voice loop never race.
 
 Endpoints:
   GET  /                  → the dashboard page
   GET  /api/state         → pipeline state, mute, uptime, models, spend, log
+  GET  /api/events        → Server-Sent Events stream of job/pipeline events
   POST /api/config        → update editable settings/budgets (writes config.json)
   GET  /api/variables     → all memory variables
   POST /api/variables     → add/edit a variable {key, value}
@@ -16,15 +19,19 @@ Endpoints:
   GET  /api/notes/<title> → one note's content
   POST /api/notes         → create/overwrite {title, content}
   DELETE /api/notes/<title>
-  POST /api/message       → {text} → run through the pipeline, return reply (text)
+  POST /api/message       → {text} → enqueue on the orchestrator, return reply (text)
+  POST /api/interrupt     → cancel the running turn and clear the queue
   POST /api/confirm/respond → {id, allow} → resolve pending tool confirm
 """
 
 from __future__ import annotations
 
+import json
 import logging
+import queue
+import threading
 
-from flask import Flask, jsonify, request
+from flask import Flask, Response, jsonify, request
 
 import costs
 import events
@@ -35,6 +42,40 @@ logger = logging.getLogger("jarvis.dashboard")
 
 HOST = "127.0.0.1"
 PORT = 7777
+
+# -- Server-Sent Events fan-out ---------------------------------------------
+# The orchestrator emits job/state events on the shared bus; we mirror them to
+# every connected browser so the UI updates instantly instead of polling hard.
+_sse_clients: set[queue.Queue] = set()
+_sse_lock = threading.Lock()
+_sse_subscribed = False
+_SSE_KEEPALIVE_SEC = 15.0
+_SSE_QUEUE_MAX = 100
+
+
+def _broadcast(event: str, payload: dict) -> None:
+    msg = json.dumps({"event": event, **payload})
+    with _sse_lock:
+        clients = list(_sse_clients)
+    for client in clients:
+        try:
+            client.put_nowait(msg)
+        except queue.Full:
+            pass  # slow client — drop this update, next poll reconciles
+
+
+def _ensure_bus_subscription() -> None:
+    global _sse_subscribed
+    with _sse_lock:
+        if _sse_subscribed:
+            return
+        _sse_subscribed = True
+    try:
+        from orchestrator.runtime import get_bus
+
+        get_bus().subscribe(lambda event, payload: _broadcast(event, payload))
+    except Exception:  # noqa: BLE001
+        logger.debug("SSE bus subscription unavailable", exc_info=True)
 
 
 def _pending_confirm() -> dict | None:
@@ -48,6 +89,7 @@ def _pending_confirm() -> dict | None:
 def create_app() -> Flask:
     app = Flask(__name__, static_folder="static", template_folder="templates")
     app.config["JSON_SORT_KEYS"] = False
+    _ensure_bus_subscription()
 
     # -- Page ---------------------------------------------------------------
     @app.route("/")
@@ -72,6 +114,31 @@ def create_app() -> Flask:
             "conversations": events.get_recent_conversations(50),
             "pending_confirm": _pending_confirm(),
         })
+
+    # -- Real-time event stream (SSE) --------------------------------------
+    @app.route("/api/events")
+    def api_events():  # noqa: ANN202
+        def stream():  # noqa: ANN202
+            client: queue.Queue = queue.Queue(maxsize=_SSE_QUEUE_MAX)
+            with _sse_lock:
+                _sse_clients.add(client)
+            try:
+                yield "retry: 3000\n\n"
+                while True:
+                    try:
+                        msg = client.get(timeout=_SSE_KEEPALIVE_SEC)
+                        yield f"data: {msg}\n\n"
+                    except queue.Empty:
+                        yield ": keep-alive\n\n"
+            finally:
+                with _sse_lock:
+                    _sse_clients.discard(client)
+
+        return Response(
+            stream(),
+            mimetype="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     # -- Settings + budgets -------------------------------------------------
     @app.route("/api/config", methods=["GET"])
@@ -136,32 +203,40 @@ def create_app() -> Flask:
         text = (body.get("text") or "").strip()
         if not text:
             return jsonify({"ok": False, "error": "text is required"}), 400
-        # Imported lazily so the dashboard module can be imported without the
-        # heavy audio/LLM stack (e.g. in unit tests).
+        # Route through the shared orchestrator so dashboard + voice queue
+        # together instead of racing. speak=False: the reply renders on screen.
         import pipeline
-        result = pipeline.process_query(text, Config.load())
-        if result.get("busy"):
-            return jsonify({
-                "ok": False,
-                "busy": True,
-                "reply": result["reply"],
-            }), 409
-        reply = result["reply"]
-        if result.get("warning"):
-            reply = result["warning"] + " " + reply
+        from orchestrator.runtime import get_orchestrator
+        from orchestrator.types import Command, CommandSource
+
+        orch = get_orchestrator()
+        sub = orch.submit(Command(text=text, source=CommandSource.DASHBOARD, speak=False))
+        if not sub.accepted:
+            return jsonify({"ok": False, "busy": True, "reply": pipeline.BUSY_MESSAGE}), 409
+
+        job = orch.wait(sub.job_id, timeout=180.0)
+        if job is None:
+            return jsonify({"ok": False, "error": "timeout"}), 504
+        if job.error == "busy":
+            return jsonify({"ok": False, "busy": True, "reply": job.reply or pipeline.BUSY_MESSAGE}), 409
+
+        reply = job.reply
+        if job.warning:
+            reply = job.warning + " " + reply
         return jsonify({
             "ok": True,
             "reply": reply,
-            "model": result.get("model"),
-            "latency_ms": result.get("latency_ms"),
-            "cost": result.get("cost"),
-            "capped": result.get("capped", False),
+            "model": job.model,
+            "latency_ms": job.latency_ms,
+            "cost": job.cost,
+            "capped": job.capped,
         })
 
     @app.route("/api/interrupt", methods=["POST"])
     def api_interrupt():  # noqa: ANN202
-        import pipeline
-        pipeline.request_interrupt()
+        from orchestrator.runtime import get_orchestrator
+
+        get_orchestrator().cancel_current()
         return jsonify({"ok": True})
 
     @app.route("/api/confirm/respond", methods=["POST"])

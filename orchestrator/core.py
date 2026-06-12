@@ -1,88 +1,291 @@
-"""Orchestrator skeleton — Phase 1 target; wraps today's pipeline.process_query for now."""
+"""Orchestrator — the Phase 1 spine.
+
+One worker thread owns execution. Voice, dashboard, and (future) triggers all
+``submit()`` Commands instead of calling the pipeline directly. This gives us:
+
+  • a single serialisation point (no two queries running at once),
+  • a bounded FIFO queue so a follow-up enqueues instead of being rejected,
+  • stale-command dropping (a wake-word from 60 s ago shouldn't fire now),
+  • an event bus other surfaces subscribe to (dashboard SSE, loggers, the orb).
+
+The Orchestrator owns the *reply side* of a turn: it runs the query, drives the
+pipeline state (THINKING → WAITING_CONFIRM → SPEAKING → IDLE) and, for voice
+commands, speaks the reply. Producers just submit and optionally wait.
+
+See orchestrator/QUEUE_POLICY.md for the queue-depth decision.
+"""
 
 from __future__ import annotations
 
+import logging
 import threading
-from typing import Any, Protocol
+import time
+from collections import deque
+from collections.abc import Callable
+from typing import Any
 
 from orchestrator.events import EventBus
-from orchestrator.types import Command, Job, JobState
+from orchestrator.types import Command, Job, JobState, SubmitResult
 
+logger = logging.getLogger("jarvis.orchestrator")
 
-class ToolBackend(Protocol):
-    """Local registry today; MCP client in Phase 2."""
+DEFAULT_MAX_QUEUE_DEPTH = 3
+DEFAULT_MAX_COMMAND_AGE_SEC = 60.0
 
-    def list_definitions(self) -> list[dict[str, Any]]: ...
-
-    def call(self, name: str, inputs: dict[str, Any]) -> str: ...
+ProcessQuery = Callable[..., dict[str, Any]]
+Speak = Callable[..., None]
 
 
 class Orchestrator:
-    """One job at a time. Voice, dashboard, and triggers all submit Commands.
-
-    Phase 1 queue policy (planned): bounded FIFO queue (default max 3). Commands
-    wait for the current job instead of receiving 409/busy. Overflow rejects with
-    busy — see orchestrator/QUEUE_POLICY.md.
-    """
-
-    def __init__(self, bus: EventBus, process_query: callable) -> None:
+    def __init__(
+        self,
+        bus: EventBus,
+        process_query: ProcessQuery,
+        speak: Speak | None = None,
+        config_loader: Callable[[], Any] | None = None,
+        max_queue_depth: int = DEFAULT_MAX_QUEUE_DEPTH,
+        max_command_age_sec: float = DEFAULT_MAX_COMMAND_AGE_SEC,
+        interrupt_event: threading.Event | None = None,
+        request_interrupt: Callable[[], None] | None = None,
+        clear_interrupt: Callable[[], None] | None = None,
+    ) -> None:
         self._bus = bus
         self._process_query = process_query
-        self._queue: list[Command] = []
-        self._lock = threading.Lock()
-        self._cancel = threading.Event()
-        self._worker: threading.Thread | None = None
-        self._jobs: dict[str, Job] = {}
+        self._speak = speak
+        self._config_loader = config_loader
+        self._max_queue = max_queue_depth
+        self._max_age = max_command_age_sec
 
-    def submit(self, command: Command) -> str:
-        with self._lock:
+        self._interrupt_event = interrupt_event
+        self._request_interrupt = request_interrupt
+        self._clear_interrupt = clear_interrupt
+
+        self._cv = threading.Condition()
+        self._queue: deque[Command] = deque()
+        self._jobs: dict[str, Job] = {}
+        self._current_job_id: str | None = None
+        self._ui_cb: Callable[[str], None] | None = None
+        self._stop = threading.Event()
+
+        self._worker = threading.Thread(
+            target=self._run_loop, name="jarvis-orchestrator", daemon=True
+        )
+        self._worker.start()
+
+    # -- public API ---------------------------------------------------------
+
+    def set_state_callback(self, cb: Callable[[str], None] | None) -> None:
+        """Register the UI bridge (e.g. orb FaceWidget.set_state). Optional."""
+        self._ui_cb = cb
+
+    def submit(self, command: Command) -> SubmitResult:
+        emit: list[tuple[str, dict[str, Any]]] = []
+        with self._cv:
+            self._purge_stale_locked(emit)
+            busy = self._current_job_id is not None
+            if busy and len(self._queue) >= self._max_queue:
+                logger.warning(
+                    "⏳ Queue full (%d waiting) — rejecting %s command.",
+                    len(self._queue), command.source.value,
+                )
+                self._flush(emit)
+                return SubmitResult(accepted=False, reason="busy")
             self._jobs[command.id] = Job(command=command)
             self._queue.append(command)
-            self._bus.emit("job.state", job_id=command.id, state=JobState.QUEUED.value)
-            if self._worker is None or not self._worker.is_alive():
-                self._worker = threading.Thread(target=self._run_loop, daemon=True)
-                self._worker.start()
-        return command.id
+            emit.append(("job.state", {
+                "job_id": command.id,
+                "state": JobState.QUEUED.value,
+                "source": command.source.value,
+            }))
+            self._cv.notify()
+        self._flush(emit)
+        return SubmitResult(accepted=True, job_id=command.id)
+
+    def wait(self, job_id: str, timeout: float | None = None) -> Job | None:
+        job = self._jobs.get(job_id)
+        if job is None:
+            return None
+        job.wait(timeout=timeout)
+        return job
 
     def cancel_current(self) -> None:
-        self._cancel.set()
+        """Stop the running turn and drop everything still queued."""
+        self._do_request_interrupt()
+        emit: list[tuple[str, dict[str, Any]]] = []
+        with self._cv:
+            while self._queue:
+                cmd = self._queue.popleft()
+                self._mark_cancelled_locked(cmd, "cancelled", emit)
+        self._flush(emit)
+
+    def get_job(self, job_id: str) -> Job | None:
+        return self._jobs.get(job_id)
+
+    def queue_depth(self) -> int:
+        with self._cv:
+            return len(self._queue)
+
+    def shutdown(self) -> None:
+        self._stop.set()
+        with self._cv:
+            self._cv.notify_all()
+
+    # -- worker -------------------------------------------------------------
+
+    def _run_loop(self) -> None:
+        while not self._stop.is_set():
+            command: Command | None = None
+            emit: list[tuple[str, dict[str, Any]]] = []
+            with self._cv:
+                self._purge_stale_locked(emit)
+                while not self._queue and not self._stop.is_set():
+                    self._cv.wait(timeout=1.0)
+                    self._purge_stale_locked(emit)
+                if self._stop.is_set():
+                    self._flush(emit)
+                    return
+                command = self._queue.popleft()
+                self._current_job_id = command.id
+            self._flush(emit)
+            if command is not None:
+                try:
+                    self._run_one(command)
+                finally:
+                    with self._cv:
+                        self._current_job_id = None
+
+    def _run_one(self, command: Command) -> Job:
+        job = self._jobs[command.id]
+        self._do_clear_interrupt()
+        job.state = JobState.RUNNING
+        self._emit("job.state", job_id=command.id, state=JobState.RUNNING.value,
+                   source=command.source.value)
+        self._set_state("THINKING")
+        cfg = self._config_loader() if self._config_loader else None
+        try:
+            result = self._process_query(command.text, cfg, on_state=self._set_state)
+            job.reply = result.get("reply", "")
+            job.warning = result.get("warning")
+            job.model = result.get("model")
+            job.capped = bool(result.get("capped", False))
+            job.latency_ms = int(result.get("latency_ms", 0) or 0)
+            job.cost = float(result.get("cost", 0.0) or 0.0)
+            if result.get("busy"):
+                job.state, job.error = JobState.FAILED, "busy"
+            elif self._interrupt_set():
+                job.state = JobState.CANCELLED
+            else:
+                job.state = JobState.DONE
+
+            self._emit("job.transcript", job_id=command.id, heard=command.text,
+                       reply=job.reply, model=job.model, state=job.state.value)
+
+            speakable = (
+                command.speak
+                and bool(job.reply.strip())
+                and job.state in (JobState.DONE, JobState.FAILED)
+                and not self._interrupt_set()
+            )
+            if speakable:
+                spoken = f"{job.warning} {job.reply}" if job.warning else job.reply
+                self._set_state("SPEAKING")
+                self._do_speak(spoken, cfg)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("⚠️  Job %s failed: %s", command.id, exc, exc_info=True)
+            job.state = JobState.FAILED
+            job.error = str(exc)
+            if not job.reply:
+                job.reply = "Sorry, something went wrong handling that."
+        finally:
+            self._set_state("IDLE")
+            self._emit("job.state", job_id=command.id, state=job.state.value)
+            job.done_event.set()
+        return job
+
+    # -- helpers ------------------------------------------------------------
+
+    def _purge_stale_locked(self, emit: list[tuple[str, dict[str, Any]]]) -> None:
+        if not self._queue:
+            return
+        now = time.time()
+        kept: deque[Command] = deque()
+        for cmd in self._queue:
+            if cmd.age_sec(now) > self._max_age:
+                logger.info("🗑️  Dropping stale %s command (age %.0fs).",
+                            cmd.source.value, cmd.age_sec(now))
+                self._mark_cancelled_locked(cmd, "stale", emit)
+            else:
+                kept.append(cmd)
+        self._queue = kept
+
+    def _mark_cancelled_locked(
+        self, cmd: Command, reason: str, emit: list[tuple[str, dict[str, Any]]]
+    ) -> None:
+        job = self._jobs.get(cmd.id)
+        if job is not None:
+            job.state = JobState.CANCELLED
+            job.error = reason
+            job.done_event.set()
+        emit.append(("job.state", {
+            "job_id": cmd.id,
+            "state": JobState.CANCELLED.value,
+            "reason": reason,
+        }))
+
+    def _set_state(self, name: str) -> None:
+        try:
+            import events
+
+            events.set_pipeline_state(name)
+        except Exception:  # noqa: BLE001
+            logger.debug("set_pipeline_state failed for %s", name, exc_info=True)
+        self._emit("pipeline.state", state=name)
+        cb = self._ui_cb
+        if cb is not None:
+            try:
+                cb(name)
+            except Exception:  # noqa: BLE001
+                logger.debug("UI state callback failed for %s", name, exc_info=True)
+
+    def _do_speak(self, text: str, cfg: Any) -> None:
+        if self._speak is None:
+            return
+        voice_id = getattr(cfg, "cartesia_voice_id", None)
+        try:
+            if voice_id:
+                self._speak(text, voice_id=voice_id)
+            else:
+                self._speak(text)
+        except Exception:  # noqa: BLE001
+            logger.error("⚠️  TTS failed.", exc_info=True)
+
+    def _emit(self, event: str, **payload: Any) -> None:
+        self._bus.emit(event, **payload)
+
+    def _flush(self, emit: list[tuple[str, dict[str, Any]]]) -> None:
+        for event, payload in emit:
+            self._bus.emit(event, **payload)
+        emit.clear()
+
+    def _interrupt_set(self) -> bool:
+        if self._interrupt_event is not None:
+            return self._interrupt_event.is_set()
+        import pipeline
+
+        return pipeline._interrupt.is_set()
+
+    def _do_request_interrupt(self) -> None:
+        if self._request_interrupt is not None:
+            self._request_interrupt()
+            return
         import pipeline
 
         pipeline.request_interrupt()
 
-    def _run_loop(self) -> None:
-        while True:
-            with self._lock:
-                if not self._queue:
-                    return
-                command = self._queue.pop(0)
-            self._cancel.clear()
-            self._run_one(command)
+    def _do_clear_interrupt(self) -> None:
+        if self._clear_interrupt is not None:
+            self._clear_interrupt()
+            return
+        import pipeline
 
-    def _run_one(self, command: Command) -> None:
-        job = self._jobs[command.id]
-        job.state = JobState.RUNNING
-        self._bus.emit(
-            "job.state",
-            job_id=command.id,
-            state=JobState.RUNNING.value,
-            source=command.source.value,
-        )
-        from config import Config
-
-        result = self._process_query(command.text, Config.load())
-        if result.get("busy"):
-            job.state = JobState.FAILED
-            job.error = "busy"
-            job.reply = result.get("reply", "")
-        else:
-            job.state = JobState.DONE
-            job.reply = result.get("reply", "")
-        self._bus.emit(
-            "job.transcript",
-            job_id=command.id,
-            heard=command.text,
-            reply=job.reply,
-            model=result.get("model"),
-        )
-        self._bus.emit("job.state", job_id=command.id, state=job.state.value)
+        pipeline._clear_interrupt()

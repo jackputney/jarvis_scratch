@@ -44,11 +44,15 @@ logger = logging.getLogger("jarvis.pipeline")
 
 _interrupt = threading.Event()
 _query_lock = threading.Lock()
-# TODO(Phase 1): Replace thread-pool Claude calls with AsyncAnthropic + streaming so
-# Stop cancels the in-flight HTTP request and stops burning tokens after interrupt.
+# Claude calls run on this pool and stream their response; on Stop the streaming
+# helper returns early and closes the socket, which halts generation (and billing)
+# rather than letting the request finish in the background. See _create_claude_message.
 _claude_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="jarvis-claude")
 _QUEUE_POLL_SEC = 0.25
 CLAUDE_HTTP_TIMEOUT_SEC = 30.0
+# Upper bound a voice turn can occupy the orchestrator (query + tool confirm wait
+# + TTS). Generous: the confirm gate alone can hold for confirm_timeout_sec.
+VOICE_JOB_TIMEOUT_SEC = 180.0
 
 AUDIO_RATE = 16000
 FRAME_DURATION_MS = 30
@@ -345,8 +349,24 @@ def _build_system_prompt(cfg: Config) -> str:
 
 
 def _create_claude_message(client: anthropic.Anthropic, **kwargs: Any) -> Any:
-    """Run a Claude HTTP call off the pipeline thread (interruptible wait)."""
-    return client.messages.create(**kwargs)
+    """Stream a Claude message so a Stop closes the HTTP connection mid-generation.
+
+    Returns ``None`` if interrupted: exiting the stream context manager closes the
+    socket, which actually halts token generation (and billing) instead of letting
+    the request run to completion in the background.
+    """
+    try:
+        stream_cm = client.messages.stream(**kwargs)
+    except (AttributeError, TypeError):
+        # Older SDKs without the streaming helper — fall back to a blocking call.
+        return client.messages.create(**kwargs)
+    with stream_cm as stream:
+        for _event in stream:
+            if _interrupt.is_set():
+                return None
+        if _interrupt.is_set():
+            return None
+        return stream.get_final_message()
 
 
 def _emit_pipeline_state(
@@ -403,6 +423,11 @@ def _call_claude(
             if _interrupt.is_set():
                 return "", model, total_cost
             return "Sorry, I couldn't reach my brain. Please try again.", model, total_cost
+
+        if response is None:
+            # Streaming call was cancelled mid-flight — connection already closed.
+            logger.info("⏹️  Claude stream cancelled — no tokens charged past cut-off.")
+            return "", model, total_cost
 
         if _interrupt.is_set():
             logger.info("⏹️  Claude loop aborted after response (interrupt).")
@@ -562,6 +587,12 @@ def run_pipeline(
         if state_callback:
             state_callback(name)
 
+    from orchestrator.runtime import get_orchestrator
+    from orchestrator.types import Command, CommandSource
+
+    orchestrator = get_orchestrator()
+    orchestrator.set_state_callback(state_callback)
+
     last_budget_level = ""
 
     def push_budget_level(active_cfg: Config) -> None:
@@ -671,30 +702,22 @@ def run_pipeline(
                     logger.info("🤔 Nothing intelligible heard — back to listening.")
                     continue
 
-                try:
-                    result = process_query(text, cfg, on_state=set_state)
-                except Exception as exc:  # noqa: BLE001
-                    logger.error("⚠️  Query failed: %s", exc, exc_info=True)
-                    result = {"reply": "Sorry, I couldn't reach my brain. Please check your API key.",
-                              "warning": None, "capped": False}
-
-                if _interrupt.is_set():
-                    logger.info("⏹️  Cycle aborted — skipping speech.")
+                # Hand the turn to the orchestrator: it serialises against the
+                # dashboard, runs the query, drives THINKING/WAITING_CONFIRM/
+                # SPEAKING, and speaks the reply. We keep the mic paused and wait
+                # for the turn to finish so Jarvis never captures its own voice.
+                sub = orchestrator.submit(
+                    Command(text=text, source=CommandSource.VOICE, speak=True)
+                )
+                if not sub.accepted:
+                    logger.warning("⏳ Queue full — dropping this voice command.")
                     set_state("IDLE")
                     continue
 
+                job = orchestrator.wait(sub.job_id, timeout=VOICE_JOB_TIMEOUT_SEC)
                 push_budget_level(cfg)
-                spoken = result["reply"]
-                if result.get("warning"):
-                    spoken = result["warning"] + " " + spoken
-
-                logger.info("💬 Reply: %s", result["reply"])
-                set_state("SPEAKING")
-                speak(spoken, voice_id=cfg.cartesia_voice_id)
-
-                if _interrupt.is_set():
-                    logger.info("⏹️  Speech interrupted.")
-                    set_state("IDLE")
+                if job is not None and job.reply:
+                    logger.info("💬 Reply: %s", job.reply)
 
             except Exception as exc:  # noqa: BLE001
                 logger.error("⚠️  Pipeline cycle failed: %s", exc, exc_info=True)

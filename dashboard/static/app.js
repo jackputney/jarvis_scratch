@@ -17,9 +17,26 @@ async function sendJSON(url, method, body) {
 
 const money = (n) => "$" + (Number(n) || 0).toFixed(2);
 
-let _pollMs = 2000;
+const POLL_IDLE_MS = 5000;   // SSE drives instant updates; polling is a fallback
+const POLL_CONFIRM_MS = 500; // tighten while a tool-confirm modal is pending
+let _pollMs = POLL_IDLE_MS;
 let _pollTimer = null;
 let _activeConfirmId = null;
+
+const STATE_LABELS = {
+  IDLE: "Idle",
+  LISTENING: "Listening",
+  THINKING: "Thinking",
+  WAITING_CONFIRM: "Waiting for approval",
+  SPEAKING: "Speaking",
+};
+
+function applyStateName(name) {
+  if (!name) return;
+  const dot = $("state-dot");
+  dot.className = "dot " + name.toLowerCase();
+  $("state-label").textContent = STATE_LABELS[name] || name;
+}
 
 function schedulePoll() {
   if (_pollTimer) clearTimeout(_pollTimer);
@@ -34,10 +51,10 @@ function renderConfirm(pending) {
   if (!pending) {
     overlay.classList.add("hidden");
     _activeConfirmId = null;
-    _pollMs = 2000;
+    _pollMs = POLL_IDLE_MS;
     return;
   }
-  _pollMs = 500;
+  _pollMs = POLL_CONFIRM_MS;
   _activeConfirmId = pending.id;
   overlay.classList.remove("hidden");
   $("confirm-tool").textContent = pending.tool;
@@ -67,16 +84,7 @@ function fmtUptime(s) {
 
 function renderState(s) {
   const dot = $("state-dot");
-  const stateKey = s.pipeline_state.toLowerCase();
-  dot.className = "dot " + stateKey;
-  const stateLabels = {
-    IDLE: "Idle",
-    LISTENING: "Listening",
-    THINKING: "Thinking",
-    WAITING_CONFIRM: "Waiting for approval",
-    SPEAKING: "Speaking",
-  };
-  $("state-label").textContent = stateLabels[s.pipeline_state] || s.pipeline_state;
+  applyStateName(s.pipeline_state);
   $("mute-label").textContent = s.muted ? "muted" : "unmuted";
   $("uptime").textContent = fmtUptime(s.uptime_seconds);
   $("models").textContent = `${s.models.fast} / ${s.models.smart}`;
@@ -248,8 +256,33 @@ async function refresh() {
   } catch (e) { /* ignore transient errors */ }
 }
 
+// ---- Real-time event stream (SSE) -------------------------------------
+let _events = null;
+function connectEvents() {
+  if (_events) _events.close();
+  _events = new EventSource("/api/events");
+  _events.onmessage = (e) => {
+    let data;
+    try { data = JSON.parse(e.data); } catch { return; }
+    switch (data.event) {
+      case "pipeline.state":
+        applyStateName(data.state);
+        // Approval needed: pull the pending confirm right away.
+        if (data.state === "WAITING_CONFIRM") refresh();
+        break;
+      case "job.transcript":
+      case "job.state":
+        // Conversation log / spend / confirm clearing — reconcile from /api/state.
+        refresh();
+        break;
+    }
+  };
+  _events.onerror = () => { /* EventSource auto-reconnects; polling covers gaps */ };
+}
+
 (async function init() {
   await loadConfig();
   await Promise.all([loadVars(), loadNotes(), refresh()]);
+  connectEvents();
   schedulePoll();
 })();

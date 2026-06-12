@@ -177,3 +177,50 @@ def test_confirm_ux_waiting_state_and_speech(temp_env, monkeypatch):
     assert dispatch_order == ["send_email"]
     assert speaks[0] == pipeline.CONFIRM_PROMPT
     assert events.get_state()["pipeline_state"] == "THINKING"
+
+
+def test_create_claude_message_cancels_stream_on_interrupt():
+    """Streaming call returns None and closes the connection when Stop fires."""
+    pipeline._interrupt.clear()
+
+    class FakeStream:
+        def __iter__(self):
+            yield from (1, 2, 3, 4, 5)
+
+        def get_final_message(self):
+            return "FINAL"
+
+    class FakeCM:
+        def __init__(self):
+            self.closed = False
+            self._stream = FakeStream()
+
+        def __enter__(self):
+            return self._stream
+
+        def __exit__(self, *exc):
+            self.closed = True
+            return False
+
+    class FakeMessages:
+        def __init__(self):
+            self.cm = FakeCM()
+
+        def stream(self, **kwargs):
+            return self.cm
+
+    class FakeClient:
+        def __init__(self):
+            self.messages = FakeMessages()
+
+    client = FakeClient()
+    assert pipeline._create_claude_message(client) == "FINAL"
+    assert client.messages.cm.closed is True
+
+    interrupted = FakeClient()
+    pipeline._interrupt.set()
+    try:
+        assert pipeline._create_claude_message(interrupted) is None
+        assert interrupted.messages.cm.closed is True
+    finally:
+        pipeline._interrupt.clear()

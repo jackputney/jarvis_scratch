@@ -12,6 +12,17 @@ def client(temp_env):
     return app.test_client()
 
 
+@pytest.fixture(autouse=True)
+def _reset_interrupt():
+    """Clear any global interrupt the orchestrator/cancel path may leave set."""
+    yield
+    import sys
+
+    pipeline = sys.modules.get("pipeline")
+    if pipeline is not None:
+        pipeline._clear_interrupt()
+
+
 def test_index_serves(client):
     r = client.get("/")
     assert r.status_code == 200
@@ -81,7 +92,7 @@ def test_message_busy_returns_409(client, temp_env, monkeypatch):
     monkeypatch.setattr(
         pipeline,
         "process_query",
-        lambda text, cfg: {
+        lambda text, cfg, on_state=None: {
             "reply": pipeline.BUSY_MESSAGE,
             "busy": True,
             "model": "(busy)",
@@ -92,3 +103,25 @@ def test_message_busy_returns_409(client, temp_env, monkeypatch):
     r = client.post("/api/message", json={"text": "hi"})
     assert r.status_code == 409
     assert r.get_json()["busy"] is True
+
+
+def test_message_happy_path_returns_reply(client, temp_env, monkeypatch):
+    import pipeline
+
+    monkeypatch.setattr(
+        pipeline,
+        "process_query",
+        lambda text, cfg, on_state=None: {
+            "reply": "hello back",
+            "busy": False,
+            "model": "m",
+            "latency_ms": 12,
+            "cost": 0.001,
+        },
+    )
+    r = client.post("/api/message", json={"text": "hi"})
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["ok"] is True
+    assert body["reply"] == "hello back"
+    assert body["model"] == "m"

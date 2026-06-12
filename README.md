@@ -32,10 +32,10 @@ A localhost-only Flask panel at **http://127.0.0.1:7777** (started automatically
 - **Conversation log** — last 50 exchanges with model, latency, and cost.
 - **Memory** — edit variables and notes (add / edit / delete).
 - **Settings** — wake word on/off, confirm-before-execute, Whisper model, fast/smart models, routing threshold, TTS voice. Saved to `config.json` and applied live (no restart).
-- **Talk box** — type to Jarvis and get a text reply (same pipeline, minus speech).
-- **Tool confirm modal** — when Jarvis wants to run a high-risk tool (`send_email`, sheet writes), a popup appears here with Allow/Deny. Auto-denies after 30s if you do not respond. Stop on the orb cancels a pending confirm.
+- **Talk box** — type to Jarvis and get a text reply (same pipeline, minus speech). Messages share the orchestrator queue with the voice loop, so they run in order instead of racing.
+- **Tool confirm modal** — when Jarvis wants to run a high-risk tool (`send_email`, sheet writes), the orb turns **amber** (`WAITING_CONFIRM`), Jarvis says *"I need your approval — check the dashboard"*, and a popup appears here with Allow/Deny. Auto-denies after 30s if you do not respond. Stop on the orb cancels a pending confirm.
 
-All `/api/*` endpoints bind to `127.0.0.1` only.
+Live updates arrive over a **Server-Sent Events** stream (`/api/events`) fed by the orchestrator, so state, confirms, and the conversation log update instantly; a slow poll is the fallback if the stream drops. All `/api/*` endpoints bind to `127.0.0.1` only.
 
 <!-- Dashboard screenshots: add screenshots/dashboard.png here. -->
 
@@ -108,16 +108,25 @@ audio capture + VAD trim (pyaudio + webrtcvad)
     ↓ raw PCM
 transcription (mlx-whisper, tiny, Metal)
     ↓ text
+orchestrator.submit(Command)  ── bounded FIFO queue (depth 3), 60s stale-drop
+    ↓ single worker thread (serialises voice + dashboard)
 route: word count + keywords → haiku or sonnet
     ↓
-Claude API (tools= for function calling)
+Claude API (streaming; Stop closes the socket and halts billing)
     ↓ tool_use blocks
-tools/registry.py dispatch loop
+tools/registry.py dispatch loop  ── high-risk tools gate on dashboard confirm
     ↓ final reply text
 Cartesia streaming TTS → pyaudio (first audio ~150ms)
     ↓
-UI state: IDLE → LISTENING → THINKING → SPEAKING
+event bus → orb state + dashboard SSE
+UI state: IDLE → LISTENING → THINKING → WAITING_CONFIRM → SPEAKING
 ```
+
+**Orchestrator (`orchestrator/`)** — voice, dashboard, and (future) triggers all
+`submit()` Commands to one worker instead of calling the pipeline directly. This
+serialises execution, queues follow-ups (instead of rejecting them), drops stale
+commands, and publishes job/state events on a bus that the dashboard SSE stream
+and the orb subscribe to. See `orchestrator/QUEUE_POLICY.md`.
 
 ## Tools available to Jarvis
 
@@ -160,9 +169,10 @@ Both paths are gitignored.
 | IDLE | Static orb |
 | LISTENING | Slow breathing pulse (0.9×–1.1× scale, 1.5s cycle) |
 | THINKING | Fast rotating arc around the orb |
+| WAITING_CONFIRM | Amber pulse — a high-risk tool is awaiting your dashboard approval |
 | SPEAKING | Ripple rings expanding from centre |
 
-Click the orb to toggle mute. Drag the window to reposition it.
+Click the orb to toggle mute. Drag the window to reposition it. Press **Stop** (button or Escape) to cancel the running turn and clear anything still queued.
 
 ## Headless mode
 
