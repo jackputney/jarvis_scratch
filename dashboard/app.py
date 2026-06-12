@@ -17,6 +17,7 @@ Endpoints:
   POST /api/notes         → create/overwrite {title, content}
   DELETE /api/notes/<title>
   POST /api/message       → {text} → run through the pipeline, return reply (text)
+  POST /api/confirm/respond → {id, allow} → resolve pending tool confirm
 """
 
 from __future__ import annotations
@@ -34,6 +35,14 @@ logger = logging.getLogger("jarvis.dashboard")
 
 HOST = "127.0.0.1"
 PORT = 7777
+
+
+def _pending_confirm() -> dict | None:
+    try:
+        from tools import confirm as tool_confirm
+        return tool_confirm.get_pending()
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def create_app() -> Flask:
@@ -61,6 +70,7 @@ def create_app() -> Flask:
             },
             "spend": costs.get_spend_summary(cfg.daily_budget_usd, cfg.monthly_budget_usd),
             "conversations": events.get_recent_conversations(50),
+            "pending_confirm": _pending_confirm(),
         })
 
     # -- Settings + budgets -------------------------------------------------
@@ -147,6 +157,19 @@ def create_app() -> Flask:
         import pipeline
         pipeline.request_interrupt()
         return jsonify({"ok": True})
+
+    @app.route("/api/confirm/respond", methods=["POST"])
+    def api_confirm_respond():  # noqa: ANN202
+        from tools import confirm as tool_confirm
+        body = request.get_json(silent=True) or {}
+        confirm_id = (body.get("id") or "").strip()
+        if not confirm_id:
+            return jsonify({"ok": False, "error": "id is required"}), 400
+        allow = bool(body.get("allow"))
+        resolved = tool_confirm.respond(confirm_id, allow)
+        if not resolved:
+            return jsonify({"ok": False, "error": "no matching pending confirm"}), 404
+        return jsonify({"ok": True, "allow": allow})
 
     return app
 

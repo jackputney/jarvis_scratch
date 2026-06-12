@@ -31,6 +31,7 @@ import pyaudio
 import webrtcvad
 
 import costs
+import conversation
 import events
 from config import Config
 from memory.knowledge import get_recent_notes
@@ -50,10 +51,11 @@ CHANNELS = 1
 PA_FORMAT = pyaudio.paInt16
 SAMPLE_WIDTH = 2
 MAX_RECORD_SECONDS = 20
-POST_SPEECH_SILENCE_FRAMES = 25
-WAIT_FOR_SPEECH_FRAMES = int(4000 / FRAME_DURATION_MS)
+POST_SPEECH_SILENCE_FRAMES = 25  # fallback if config not passed
+WAIT_FOR_SPEECH_FRAMES = int(6000 / FRAME_DURATION_MS)
 PRE_ROLL_FRAMES = 8
-WAKE_THRESHOLD = 0.5
+WAKE_THRESHOLD = 0.55
+WAKE_CONSECUTIVE_HITS = 2
 AUDIO_THREAD_RESTART_DELAY = 2.0
 
 WARN_80_MESSAGE = "Heads up, I'm at 80 percent of today's budget."
@@ -64,6 +66,8 @@ def request_interrupt() -> None:
     """Stop the current utterance and abandon the in-flight pipeline cycle."""
     _interrupt.set()
     stop_speech()
+    from tools import confirm as tool_confirm
+    tool_confirm.cancel_pending()
     logger.info("⏹️  Stop requested — halting speech and resetting.")
 
 
@@ -169,7 +173,9 @@ def _audio_loop(
             audio_int16 = np.frombuffer(data, dtype=np.int16)
             oww_model.predict(audio_int16)
             for name, scores in oww_model.prediction_buffer.items():
-                if scores[-1] > WAKE_THRESHOLD:
+                if len(scores) < WAKE_CONSECUTIVE_HITS:
+                    continue
+                if all(scores[-i] > WAKE_THRESHOLD for i in range(1, WAKE_CONSECUTIVE_HITS + 1)):
                     logger.info("🎙️  Wake word '%s' detected (score=%.2f)", name, scores[-1])
                     _reset_oww(oww_model)
                     # Capture from this frame forward — do NOT replay pre-roll
@@ -221,12 +227,19 @@ def _start_audio_thread(
     return t
 
 
-def _record_from_queue(capture_queue: "queue.Queue[bytes]") -> bytes:
+def _record_from_queue(
+    capture_queue: "queue.Queue[bytes]",
+    *,
+    silence_ms: int = 1400,
+    min_capture_ms: int = 2500,
+) -> bytes:
     vad = webrtcvad.Vad(2)
     frames: list[bytes] = []
     silent_frames = 0
     speech_started = False
     max_frames = int(MAX_RECORD_SECONDS * 1000 / FRAME_DURATION_MS)
+    post_speech_silence_frames = max(10, int(silence_ms / FRAME_DURATION_MS))
+    min_capture_frames = max(15, int(min_capture_ms / FRAME_DURATION_MS))
 
     logger.info("🎙️  Listening…")
     for i in range(max_frames):
@@ -240,6 +253,7 @@ def _record_from_queue(capture_queue: "queue.Queue[bytes]") -> bytes:
             if speech_started:
                 continue
             if i >= WAIT_FOR_SPEECH_FRAMES:
+                logger.debug("🎙️  Capture timed out waiting for speech.")
                 break
             continue
 
@@ -251,7 +265,12 @@ def _record_from_queue(capture_queue: "queue.Queue[bytes]") -> bytes:
         elif speech_started:
             silent_frames += 1
             frames.append(data)
-            if silent_frames > POST_SPEECH_SILENCE_FRAMES:
+            if i >= min_capture_frames and silent_frames > post_speech_silence_frames:
+                logger.debug(
+                    "🎙️  Ending capture after %.1fs (%.0fms trailing silence).",
+                    (i + 1) * FRAME_DURATION_MS / 1000,
+                    silent_frames * FRAME_DURATION_MS,
+                )
                 break
         else:
             frames.append(data)
@@ -306,21 +325,31 @@ def _build_system_prompt(cfg: Config) -> str:
         "You are Jarvis, a fast personal AI assistant. You are direct, honest, and never "
         "flatter. You flag uncertainty rather than guessing. You have access to tools — use "
         "them when the task requires it, not otherwise. Keep spoken responses concise (under "
-        "40 words for simple questions). You know the following about the user:\n"
+        "40 words for simple questions). Recent message history may appear before the latest "
+        "user turn — use it for follow-ups. You know the following about the user:\n"
         f"{variables_block}\n\nRecent notes:\n{notes_block}"
     )
 
 
-def _call_claude(text: str, cfg: Config) -> tuple[str, str, float]:
+def _call_claude(
+    text: str,
+    cfg: Config,
+    history: list[dict[str, Any]] | None = None,
+) -> tuple[str, str, float]:
     client = anthropic.Anthropic(api_key=cfg.anthropic_api_key)
     model = cfg.claude_model_fast if cfg.route_to_fast_model(text) else cfg.claude_model_smart
     logger.info("🧠 Routing to %s", model)
 
-    messages: list[dict[str, Any]] = [{"role": "user", "content": text}]
+    messages: list[dict[str, Any]] = list(history or [])
+    messages.append({"role": "user", "content": text})
     system_prompt = _build_system_prompt(cfg)
     total_cost = 0.0
 
-    for _ in range(5):
+    for round_idx in range(5):
+        if _interrupt.is_set():
+            logger.info("⏹️  Claude loop aborted (interrupt).")
+            return "", model, total_cost
+
         response = client.messages.create(
             model=model,
             max_tokens=1024,
@@ -344,9 +373,21 @@ def _call_claude(text: str, cfg: Config) -> tuple[str, str, float]:
         messages.append({"role": "assistant", "content": response.content})
         tool_results: list[dict[str, Any]] = []
         for tu in tool_uses:
+            if _interrupt.is_set():
+                logger.info("⏹️  Tool dispatch skipped (interrupt).")
+                return reply_text.strip() or "Stopped.", model, total_cost
             logger.info("🔧 Tool: %s(%s)", tu["name"], tu["input"])
-            result = dispatch_tool(tu["name"], tu["input"], confirm=cfg.confirm_before_execute)
+            result = dispatch_tool(
+                tu["name"],
+                tu["input"],
+                confirm=cfg.confirm_before_execute,
+                confirm_timeout_sec=cfg.confirm_timeout_sec,
+                cancel_check=interrupt_requested,
+            )
             logger.info("   → %s", result[:120])
+            if _interrupt.is_set():
+                logger.info("⏹️  Cycle aborted during tool confirm.")
+                return reply_text.strip() or "Stopped.", model, total_cost
             tool_results.append({
                 "type": "tool_result",
                 "tool_use_id": tu["id"],
@@ -388,9 +429,15 @@ def process_query(text: str, cfg: Config) -> dict:
         logger.warning("⚠️  80%% of daily budget used ($%.2f).", spend_today)
 
     t0 = time.time()
-    reply, model, cost = _call_claude(text, cfg)
+    history = conversation.build_messages(
+        cfg.conversation_history_turns,
+        cfg.conversation_history_max_chars,
+    )
+    reply, model, cost = _call_claude(text, cfg, history=history)
     latency_ms = int((time.time() - t0) * 1000)
-    events.record_conversation(text, reply, model, latency_ms, cost)
+    if reply:
+        conversation.add_turn(text, reply)
+    events.record_conversation(text, reply or "(interrupted)", model, latency_ms, cost)
     logger.info("💰 Call cost $%.4f (%dms) — %s", cost, latency_ms, model)
     return {"reply": reply, "warning": warning, "capped": False,
             "model": model, "latency_ms": latency_ms, "cost": cost}
@@ -479,7 +526,11 @@ def run_pipeline(
                 set_state("LISTENING")
                 if not capturing.is_set():
                     capturing.set()
-                audio_bytes = _record_from_queue(capture_queue)
+                audio_bytes = _record_from_queue(
+                    capture_queue,
+                    silence_ms=cfg.vad_silence_ms,
+                    min_capture_ms=cfg.vad_min_capture_ms,
+                )
 
                 paused.set()
                 capturing.clear()

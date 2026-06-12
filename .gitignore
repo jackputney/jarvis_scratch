@@ -5,6 +5,7 @@ config.json
 # Memory data (personal, never committed)
 memory/knowledge/
 memory/variables.db
+memory/google_token.json
 
 # Python
 __pycache__/

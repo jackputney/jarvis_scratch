@@ -44,7 +44,7 @@
       <div class="settings-grid">
         <label class="toggle"><input type="checkbox" id="set-wake-enabled" /> Wake word on</label>
         <label class="toggle"><input type="checkbox" id="set-confirm" /> Confirm before tool execute</label>
-        <label>Whisper model <input type="text" id="set-whisper" /></label>
+        <label>Whisper model <input type="text" id="set-whisper" placeholder="tiny or small" /></label>
         <label>Fast model <input type="text" id="set-fast" /></label>
         <label>Smart model <input type="text" id="set-smart" /></label>
         <label>Routing threshold <input type="number" id="set-threshold" /></label>
@@ -97,6 +97,19 @@
       </div>
     </section>
   </main>
+
+  <div id="confirm-overlay" class="confirm-overlay hidden" role="dialog" aria-modal="true">
+    <div class="confirm-card">
+      <h2>Allow tool?</h2>
+      <p class="confirm-tool" id="confirm-tool"></p>
+      <pre class="confirm-inputs" id="confirm-inputs"></pre>
+      <p class="confirm-timer" id="confirm-timer"></p>
+      <div class="confirm-actions">
+        <button id="confirm-deny" class="danger">Deny</button>
+        <button id="confirm-allow" class="primary">Allow</button>
+      </div>
+    </div>
+  </div>
 
   <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>

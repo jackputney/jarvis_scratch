@@ -28,8 +28,9 @@ def test_get_endpoints_return_json_200(client, url):
 
 def test_state_shape(client):
     data = client.get("/api/state").get_json()
-    assert {"pipeline_state", "muted", "uptime_seconds", "models", "spend", "conversations"} <= data.keys()
+    assert {"pipeline_state", "muted", "uptime_seconds", "models", "spend", "conversations", "pending_confirm"} <= data.keys()
     assert {"today", "week", "month", "daily_budget", "monthly_budget", "daily_pct"} <= data["spend"].keys()
+    assert data["pending_confirm"] is None
 
 
 def test_variable_crud(client):
@@ -62,3 +63,13 @@ def test_interrupt_endpoint(client):
     r = client.post("/api/interrupt")
     assert r.status_code == 200
     assert r.get_json()["ok"] is True
+
+
+def test_confirm_respond_requires_id(client):
+    r = client.post("/api/confirm/respond", json={"allow": True})
+    assert r.status_code == 400
+
+
+def test_confirm_respond_404_when_no_pending(client):
+    r = client.post("/api/confirm/respond", json={"id": "missing", "allow": True})
+    assert r.status_code == 404

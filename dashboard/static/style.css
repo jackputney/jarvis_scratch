@@ -93,6 +93,7 @@ button {
 button:hover { filter: brightness(1.1); }
 button.danger { background: #2a1214; color: #ff6b6b; border: 1px solid #ff3b30; }
 button.danger:hover { filter: brightness(1.15); }
+button.primary { background: var(--accent); color: #04121b; }
 button.ghost { background: transparent; color: var(--muted); border: 1px solid var(--stroke); }
 .hint { color: var(--muted); font-size: 12px; margin-left: 10px; }
 
@@ -125,3 +126,39 @@ ul.notes li { display: flex; align-items: center; gap: 8px; padding: 5px 0; bord
 ul.notes li .title { flex: 1; cursor: pointer; color: var(--accent); }
 .note-edit { display: flex; flex-direction: column; gap: 8px; }
 .note-edit textarea { min-height: 80px; resize: vertical; }
+
+/* Tool confirm modal */
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(4, 10, 18, 0.82);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 20px;
+}
+.confirm-overlay.hidden { display: none; }
+.confirm-card {
+  background: var(--panel);
+  border: 1px solid var(--warn);
+  border-radius: 14px;
+  padding: 22px;
+  max-width: 520px;
+  width: 100%;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+}
+.confirm-card h2 { margin: 0 0 10px; color: var(--warn); font-size: 16px; }
+.confirm-tool { font-weight: 600; margin: 0 0 10px; }
+.confirm-inputs {
+  background: var(--panel-2);
+  border: 1px solid var(--stroke);
+  border-radius: 8px;
+  padding: 12px;
+  overflow: auto;
+  max-height: 220px;
+  font-size: 12px;
+  margin: 0 0 10px;
+}
+.confirm-timer { color: var(--muted); font-size: 12px; margin: 0 0 16px; }
+.confirm-actions { display: flex; gap: 10px; justify-content: flex-end; }

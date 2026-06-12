@@ -33,6 +33,7 @@ A localhost-only Flask panel at **http://127.0.0.1:7777** (started automatically
 - **Memory** — edit variables and notes (add / edit / delete).
 - **Settings** — wake word on/off, confirm-before-execute, Whisper model, fast/smart models, routing threshold, TTS voice. Saved to `config.json` and applied live (no restart).
 - **Talk box** — type to Jarvis and get a text reply (same pipeline, minus speech).
+- **Tool confirm modal** — when Jarvis wants to run a high-risk tool (`send_email`, sheet writes), a popup appears here with Allow/Deny. Auto-denies after 30s if you do not respond. Stop on the orb cancels a pending confirm.
 
 All `/api/*` endpoints bind to `127.0.0.1` only.
 
@@ -61,9 +62,15 @@ Edit `.env`:
 ```
 ANTHROPIC_API_KEY=sk-ant-...
 CARTESIA_API_KEY=sk_car_...    # optional
+
+# Google Calendar / Gmail / Sheets (optional)
+GOOGLE_CLIENT_ID=175840773134-....apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=GOCSPX-...   # env only — never commit
 ```
 
 Never commit `.env`. It is in `.gitignore`.
+
+On first use of a Google tool, Jarvis opens your browser for OAuth sign-in once and stores a refresh token in `memory/google_token.json` (also gitignored).
 
 ## Configuration
 
@@ -74,15 +81,21 @@ Edit `config.json` (also gitignored — safe to customise):
 | `claude_model_fast` | `claude-haiku-4-5` | Model for short/simple queries (≤20 words) |
 | `claude_model_smart` | `claude-sonnet-4-6` | Model for complex queries |
 | `routing_word_threshold` | `20` | Word count below which fast model is used |
-| `whisper_model` | `tiny` | mlx-whisper model size |
+| `whisper_model` | `tiny` | mlx-whisper model size (`small` is more accurate but slower) |
 | `cartesia_voice_id` | British male | Cartesia voice UUID |
-| `confirm_before_execute` | `true` | Ask before running any tool |
+| `confirm_before_execute` | `true` | Dashboard confirm for high-risk tools only (see below) |
 | `ui_enabled` | `true` | Show the orb face widget |
 | `wake_word` | `hey_jarvis` | openWakeWord model name (spoken trigger: "hey Jarvis") |
 | `wake_word_enabled` | `true` | Listen for the wake word (off = dashboard text only) |
 | `memory_inject_last_n_notes` | `5` | Notes injected into each prompt |
 | `daily_budget_usd` | `2.00` | Hard daily spend cap (USD) |
 | `monthly_budget_usd` | `40.00` | Monthly spend reference (USD) |
+| `google_client_id` | `""` | Optional fallback if `GOOGLE_CLIENT_ID` is not in `.env` |
+| `conversation_history_turns` | `8` | Prior user/assistant turns sent to Claude (in-memory, per session) |
+| `conversation_history_max_chars` | `6000` | Character cap on injected history (limits input-token cost) |
+| `confirm_timeout_sec` | `30` | Auto-deny high-risk tool confirms after this many seconds |
+
+`GOOGLE_CLIENT_SECRET` lives in `.env` only — never in `config.json`.
 
 All of these are also editable live from the dashboard Settings panel.
 
@@ -116,8 +129,20 @@ UI state: IDLE → LISTENING → THINKING → SPEAKING
 | `get_variable` | Retrieve a stored fact |
 | `write_note` | Save a Markdown note to `memory/knowledge/` |
 | `read_note` | Read a note by title |
+| `get_calendar_events` | Upcoming Google Calendar events (read-only) |
+| `get_todays_schedule` | Today's calendar, formatted for speech |
+| `get_unread_emails` | Unread Gmail summaries (read-only) |
+| `search_emails` | Search Gmail by query (read-only) |
+| `send_email` | Send email via Gmail (**confirm required**) |
+| `read_sheet` | Read a Google Sheets range (read-only) |
+| `append_row` | Append a row to a sheet (**confirm required**) |
+| `update_cell` | Update one sheet cell (**confirm required**) |
 
-Set `confirm_before_execute: false` in `config.json` to run tools without a keypress confirmation.
+Set `confirm_before_execute: false` in `config.json` to skip dashboard confirms entirely (not recommended for `send_email` or sheet writes).
+
+When confirm is on, **low-risk tools run immediately** (`write_note`, `set_variable`, `open_app`). **High-risk tools** (`send_email`, `append_row`, `update_cell`) show a dashboard Allow/Deny modal and auto-deny after `confirm_timeout_sec`. Press **Stop** on the orb to cancel a pending confirm without freezing the voice loop.
+
+For better speech recognition, set `"whisper_model": "small"` in `config.json` or the dashboard Settings panel.
 
 ## Memory
 

@@ -55,6 +55,8 @@ def _check_keys(cfg: Config) -> None:
         sys.exit(1)
     if not cfg.cartesia_api_key:
         print("⚠️  CARTESIA_API_KEY not set — using local TTS (no streaming British voice).")
+    if not cfg.google_client_id or not cfg.google_client_secret:
+        print("⚠️  GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET not set — Google tools disabled.")
 
 
 def _start_dashboard() -> None:
@@ -75,7 +77,12 @@ def _print_banner(cfg: Config) -> None:
     print(f"   🧠 Models         : {cfg.claude_model_fast} (fast) / {cfg.claude_model_smart} (smart)")
     print(f"   🎧 Whisper        : {cfg.whisper_model}")
     print(f"   💰 Budget         : ${cfg.daily_budget_usd:.2f}/day · ${cfg.monthly_budget_usd:.2f}/month")
-    print(f"   🔧 Confirm tools  : {cfg.confirm_before_execute}")
+    confirm_label = (
+        "dashboard (high-risk only)"
+        if cfg.confirm_before_execute
+        else "off"
+    )
+    print(f"   🔧 Confirm tools  : {confirm_label}")
     print(f"   🖥️  UI             : {'on' if cfg.ui_enabled else 'off'}")
 
 

@@ -46,3 +46,8 @@ Werkzeug==3.1.8
 
 # Tests (dev)
 pytest==9.0.3
+
+# Google APIs (Calendar, Gmail, Sheets)
+google-auth==2.29.0
+google-auth-oauthlib==1.2.0
+google-api-python-client==2.127.0

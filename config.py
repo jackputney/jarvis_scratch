@@ -13,6 +13,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 CONFIG_PATH = Path(__file__).parent / "config.json"
+_ENV_PATH = Path(__file__).parent / ".env"
+
+
+def _load_dotenv_if_present() -> None:
+    """Load .env so GOOGLE_CLIENT_SECRET and other keys are in os.environ."""
+    if not _ENV_PATH.is_file():
+        return
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(_ENV_PATH, override=False)
+    except ImportError:
+        pass
 
 
 # Config fields that live in config.json (everything except the env-only keys).
@@ -29,6 +41,12 @@ _PERSISTED_FIELDS = (
     "memory_inject_last_n_notes",
     "daily_budget_usd",
     "monthly_budget_usd",
+    "google_client_id",
+    "conversation_history_turns",
+    "conversation_history_max_chars",
+    "confirm_timeout_sec",
+    "vad_silence_ms",
+    "vad_min_capture_ms",
 )
 
 
@@ -46,13 +64,21 @@ class Config:
     memory_inject_last_n_notes: int = 5
     daily_budget_usd: float = 2.00
     monthly_budget_usd: float = 40.00
+    google_client_id: str = ""  # optional fallback; prefer GOOGLE_CLIENT_ID in .env
+    conversation_history_turns: int = 8
+    conversation_history_max_chars: int = 6000
+    confirm_timeout_sec: int = 30
+    vad_silence_ms: int = 1400
+    vad_min_capture_ms: int = 2500
 
     # Derived from env — never stored in config.json
     anthropic_api_key: str = field(default="", repr=False)
     cartesia_api_key: str = field(default="", repr=False)
+    google_client_secret: str = field(default="", repr=False)
 
     @classmethod
     def load(cls) -> "Config":
+        _load_dotenv_if_present()
         data: dict = {}
         if CONFIG_PATH.exists():
             with open(CONFIG_PATH) as fh:
@@ -73,10 +99,26 @@ class Config:
             ),
             daily_budget_usd=data.get("daily_budget_usd", cls.daily_budget_usd),
             monthly_budget_usd=data.get("monthly_budget_usd", cls.monthly_budget_usd),
+            google_client_id=data.get("google_client_id", cls.google_client_id),
+            conversation_history_turns=data.get(
+                "conversation_history_turns", cls.conversation_history_turns
+            ),
+            conversation_history_max_chars=data.get(
+                "conversation_history_max_chars", cls.conversation_history_max_chars
+            ),
+            confirm_timeout_sec=data.get("confirm_timeout_sec", cls.confirm_timeout_sec),
+            vad_silence_ms=data.get("vad_silence_ms", cls.vad_silence_ms),
+            vad_min_capture_ms=data.get("vad_min_capture_ms", cls.vad_min_capture_ms),
         )
 
         cfg.anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY", "")
         cfg.cartesia_api_key = os.environ.get("CARTESIA_API_KEY", "")
+        cfg.google_client_secret = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+        env_google_id = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
+        if env_google_id:
+            cfg.google_client_id = env_google_id
+        elif cfg.google_client_id:
+            os.environ.setdefault("GOOGLE_CLIENT_ID", cfg.google_client_id)
 
         return cfg
 

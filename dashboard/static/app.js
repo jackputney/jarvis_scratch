@@ -17,6 +17,46 @@ async function sendJSON(url, method, body) {
 
 const money = (n) => "$" + (Number(n) || 0).toFixed(2);
 
+let _pollMs = 2000;
+let _pollTimer = null;
+let _activeConfirmId = null;
+
+function schedulePoll() {
+  if (_pollTimer) clearTimeout(_pollTimer);
+  _pollTimer = setTimeout(async () => {
+    await refresh();
+    schedulePoll();
+  }, _pollMs);
+}
+
+function renderConfirm(pending) {
+  const overlay = $("confirm-overlay");
+  if (!pending) {
+    overlay.classList.add("hidden");
+    _activeConfirmId = null;
+    _pollMs = 2000;
+    return;
+  }
+  _pollMs = 500;
+  _activeConfirmId = pending.id;
+  overlay.classList.remove("hidden");
+  $("confirm-tool").textContent = pending.tool;
+  $("confirm-inputs").textContent = JSON.stringify(pending.inputs, null, 2);
+  const remaining = Math.max(0, Math.ceil(pending.timeout_sec - pending.age_sec));
+  $("confirm-timer").textContent = `Auto-deny in ${remaining}s if you don't choose.`;
+}
+
+async function respondConfirm(allow) {
+  if (!_activeConfirmId) return;
+  await sendJSON("/api/confirm/respond", "POST", { id: _activeConfirmId, allow });
+  $("confirm-overlay").classList.add("hidden");
+  _activeConfirmId = null;
+  refresh();
+}
+
+$("confirm-allow").onclick = () => respondConfirm(true);
+$("confirm-deny").onclick = () => respondConfirm(false);
+
 function fmtUptime(s) {
   s = Number(s) || 0;
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
@@ -45,6 +85,8 @@ function renderState(s) {
   $("budget-caption").textContent =
     `${sp.daily_pct}% of daily budget (${money(sp.today)} / ${money(sp.daily_budget)})`;
   if (sp.daily_pct >= 100) dot.classList.add("capped");
+
+  renderConfirm(s.pending_confirm || null);
 
   // Log
   const body = $("log-body");
@@ -201,5 +243,5 @@ async function refresh() {
 (async function init() {
   await loadConfig();
   await Promise.all([loadVars(), loadNotes(), refresh()]);
-  setInterval(refresh, 2000);
+  schedulePoll();
 })();
