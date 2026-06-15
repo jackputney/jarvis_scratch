@@ -12,11 +12,17 @@ class hierarchy — just explicit, readable mappings.
 from __future__ import annotations
 
 from memory.knowledge import read_note, write_note
+from memory.semantic import remember as remember_fact, search as search_memory_index
 from memory.variables import get_variable, set_variable
+from tools.github import create_github_comment, get_github_repo_summary, search_github_issues
 from tools.google_calendar import get_calendar_events, get_todays_schedule
+from tools.google_contacts import list_contacts, search_contacts
+from tools.google_drive import read_drive_file, search_drive
 from tools.gmail import get_unread_emails, search_emails, send_email
 from tools.google_sheets import append_row, read_sheet, update_cell
+from tools.slack import read_slack_channel, send_slack_message
 from tools.system import open_app
+from tools.weather import get_weather
 from tools.web import web_search
 
 # ---------------------------------------------------------------------------
@@ -26,7 +32,7 @@ from tools.web import web_search
 TOOL_DEFINITIONS: list[dict] = [
     {
         "name": "open_app",
-        "description": "Open a macOS application by name.",
+        "description": "Open an application by name (macOS, Windows, or Linux).",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -40,7 +46,7 @@ TOOL_DEFINITIONS: list[dict] = [
     },
     {
         "name": "web_search",
-        "description": "Search the web via DuckDuckGo and return a short text summary.",
+        "description": "Search the web via Brave Search (or DuckDuckGo fallback) and return ranked results.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -96,6 +102,36 @@ TOOL_DEFINITIONS: list[dict] = [
                 "title": {"type": "string", "description": "The note title to retrieve."},
             },
             "required": ["title"],
+        },
+    },
+    {
+        "name": "remember",
+        "description": (
+            "Persist a durable personal fact about the user to their local profile "
+            "(preferences, relationships, routines, goals). Use for information worth "
+            "recalling in future conversations."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "fact": {"type": "string", "description": "The fact to remember about the user."},
+            },
+            "required": ["fact"],
+        },
+    },
+    {
+        "name": "search_memory",
+        "description": "Search the user's local semantic memory for relevant past notes and diary entries.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "What to look for in memory."},
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of results (default 5).",
+                },
+            },
+            "required": ["query"],
         },
     },
     {
@@ -203,6 +239,124 @@ TOOL_DEFINITIONS: list[dict] = [
             "required": ["spreadsheet_id", "cell", "value"],
         },
     },
+    {
+        "name": "get_weather",
+        "description": "Get current weather and a 3-day forecast for a location (Open-Meteo, no API key).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "location": {"type": "string", "description": "City name or 'City, Country'."},
+            },
+            "required": ["location"],
+        },
+    },
+    {
+        "name": "search_contacts",
+        "description": "Search Google Contacts by name and return matching people with email and phone.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Name or partial name to search for."},
+                "max_results": {"type": "integer", "description": "Maximum matches (default 5)."},
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "list_contacts",
+        "description": "List recent Google Contacts with email and phone.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "count": {"type": "integer", "description": "Number of contacts (default 10, max 50)."},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "search_drive",
+        "description": "Search Google Drive files by name.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Search term for file names."},
+                "max_results": {"type": "integer", "description": "Maximum results (default 5)."},
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "read_drive_file",
+        "description": "Read a Google Drive file's text content by file ID (text exports only, truncated at 5000 chars).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "file_id": {"type": "string", "description": "Drive file ID from search results."},
+            },
+            "required": ["file_id"],
+        },
+    },
+    {
+        "name": "send_slack_message",
+        "description": "Send a message to a Slack channel. Requires user confirmation.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "channel": {"type": "string", "description": "Channel name or ID."},
+                "text": {"type": "string", "description": "Message text to send."},
+            },
+            "required": ["channel", "text"],
+        },
+    },
+    {
+        "name": "read_slack_channel",
+        "description": "Read recent messages from a Slack channel.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "channel": {"type": "string", "description": "Channel name or ID."},
+                "count": {"type": "integer", "description": "Number of messages (default 10)."},
+            },
+            "required": ["channel"],
+        },
+    },
+    {
+        "name": "search_github_issues",
+        "description": "Search open or closed issues in a GitHub repository.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "repo": {"type": "string", "description": "Repository as owner/name."},
+                "query": {"type": "string", "description": "Optional search filter."},
+                "state": {"type": "string", "description": "open, closed, or all (default open)."},
+            },
+            "required": ["repo"],
+        },
+    },
+    {
+        "name": "get_github_repo_summary",
+        "description": "Get basic stats and description for a GitHub repository.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "repo": {"type": "string", "description": "Repository as owner/name."},
+            },
+            "required": ["repo"],
+        },
+    },
+    {
+        "name": "create_github_comment",
+        "description": "Add a comment to a GitHub issue. Requires user confirmation.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "repo": {"type": "string", "description": "Repository as owner/name."},
+                "issue_number": {"type": "integer", "description": "Issue number."},
+                "body": {"type": "string", "description": "Comment body."},
+            },
+            "required": ["repo", "issue_number", "body"],
+        },
+    },
 ]
 
 # ---------------------------------------------------------------------------
@@ -217,6 +371,10 @@ TOOL_DISPATCH: dict[str, callable] = {
     "get_variable": lambda **kw: (get_variable(kw["key"]) or f"No value stored for '{kw['key']}'."),
     "write_note": lambda **kw: write_note(kw["title"], kw["content"]),
     "read_note": lambda **kw: (read_note(kw["title"]) or f"No note found for '{kw['title']}'."),
+    "remember": lambda **kw: remember_fact(kw["fact"]),
+    "search_memory": lambda **kw: _format_memory_hits(
+        search_memory_index(kw["query"], top_k=int(kw.get("limit") or 5))
+    ),
     "get_calendar_events": lambda **kw: get_calendar_events(kw.get("days", 7)),
     "get_todays_schedule": lambda **kw: get_todays_schedule(),
     "get_unread_emails": lambda **kw: get_unread_emails(kw.get("max", 5)),
@@ -225,18 +383,41 @@ TOOL_DISPATCH: dict[str, callable] = {
     "read_sheet": lambda **kw: read_sheet(kw["spreadsheet_id"], kw["range"]),
     "append_row": lambda **kw: append_row(kw["spreadsheet_id"], kw["sheet_name"], kw["values"]),
     "update_cell": lambda **kw: update_cell(kw["spreadsheet_id"], kw["cell"], kw["value"]),
+    "get_weather": lambda **kw: get_weather(kw["location"]),
+    "search_contacts": lambda **kw: search_contacts(kw["query"], int(kw.get("max_results") or 5)),
+    "list_contacts": lambda **kw: list_contacts(int(kw.get("count") or 10)),
+    "search_drive": lambda **kw: search_drive(kw["query"], int(kw.get("max_results") or 5)),
+    "read_drive_file": lambda **kw: read_drive_file(kw["file_id"]),
+    "send_slack_message": lambda **kw: send_slack_message(kw["channel"], kw["text"]),
+    "read_slack_channel": lambda **kw: read_slack_channel(kw["channel"], int(kw.get("count") or 10)),
+    "search_github_issues": lambda **kw: search_github_issues(
+        kw["repo"], kw.get("query", ""), kw.get("state", "open"),
+    ),
+    "get_github_repo_summary": lambda **kw: get_github_repo_summary(kw["repo"]),
+    "create_github_comment": lambda **kw: create_github_comment(
+        kw["repo"], int(kw["issue_number"]), kw["body"],
+    ),
 }
 
 # Read-only tools — never confirm.
 READ_ONLY_TOOLS = frozenset({
     "get_variable",
     "read_note",
+    "search_memory",
     "web_search",
+    "get_weather",
     "get_calendar_events",
     "get_todays_schedule",
     "get_unread_emails",
     "search_emails",
     "read_sheet",
+    "search_contacts",
+    "list_contacts",
+    "search_drive",
+    "read_drive_file",
+    "read_slack_channel",
+    "search_github_issues",
+    "get_github_repo_summary",
 })
 
 # Low-risk mutating tools — auto-allow in voice mode (confirm gate does not apply).
@@ -244,6 +425,7 @@ AUTO_ALLOW_TOOLS = frozenset({
     "open_app",
     "set_variable",
     "write_note",
+    "remember",
 })
 
 # High-risk mutating tools — dashboard confirm required when confirm_before_execute is on.
@@ -251,7 +433,18 @@ CONFIRM_REQUIRED_TOOLS = frozenset({
     "send_email",
     "append_row",
     "update_cell",
+    "send_slack_message",
+    "create_github_comment",
 })
+
+
+def _format_memory_hits(hits: list[dict]) -> str:
+    if not hits:
+        return "No matching memories found."
+    lines = []
+    for hit in hits:
+        lines.append(f"[{hit['source']}] {hit['chunk']}")
+    return "\n\n".join(lines)
 
 
 def dispatch_tool(

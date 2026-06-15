@@ -4,7 +4,12 @@ config.json
 
 # Memory data (personal, never committed)
 memory/knowledge/
+memory/diary/
+memory/profile.md
+memory/semantic_index.db
 memory/variables.db
+memory/variables.db-shm
+memory/variables.db-wal
 memory/google_token.json
 
 # Python

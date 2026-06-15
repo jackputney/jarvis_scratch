@@ -40,10 +40,12 @@ def test_google_secret_read_from_config_env(monkeypatch):
     assert cfg["installed"]["client_secret"] == "GOCSPX-test-secret"
 
 
-def test_get_credentials_missing_env_raises(monkeypatch):
+def test_get_credentials_missing_env_raises(monkeypatch, temp_env):
     monkeypatch.delenv("GOOGLE_CLIENT_ID", raising=False)
     monkeypatch.delenv("GOOGLE_CLIENT_SECRET", raising=False)
     monkeypatch.setattr("config._load_dotenv_if_present", lambda: None)
+    import config
+    config.Config.invalidate_cache()
     import tools.google_auth as ga
     with pytest.raises(RuntimeError, match="GOOGLE_CLIENT_ID"):
         ga._client_config()

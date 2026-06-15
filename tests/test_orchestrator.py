@@ -41,7 +41,7 @@ def make_orch():
 def test_voice_command_runs_and_is_spoken(make_orch):
     spoken: list[str] = []
     orch, _ev = make_orch(
-        lambda text, cfg, on_state=None: {"reply": "hi there", "model": "m"},
+        lambda text, cfg, on_state=None, speak=False: {"reply": "hi there", "model": "m"},
         speak=lambda t, **kw: spoken.append(t),
     )
     sub = orch.submit(Command("hello", CommandSource.VOICE, speak=True))
@@ -55,7 +55,7 @@ def test_voice_command_runs_and_is_spoken(make_orch):
 def test_dashboard_command_is_not_spoken(make_orch):
     spoken: list[str] = []
     orch, _ev = make_orch(
-        lambda text, cfg, on_state=None: {"reply": "on screen"},
+        lambda text, cfg, on_state=None, speak=False: {"reply": "on screen"},
         speak=lambda t, **kw: spoken.append(t),
     )
     job = orch.wait(
@@ -69,7 +69,7 @@ def test_dashboard_command_is_not_spoken(make_orch):
 def test_warning_is_prepended_when_spoken(make_orch):
     spoken: list[str] = []
     orch, _ev = make_orch(
-        lambda text, cfg, on_state=None: {"reply": "the answer", "warning": "Heads up."},
+        lambda text, cfg, on_state=None, speak=False: {"reply": "the answer", "warning": "Heads up."},
         speak=lambda t, **kw: spoken.append(t),
     )
     orch.wait(orch.submit(Command("q", CommandSource.VOICE, speak=True)).job_id, timeout=5)
@@ -81,7 +81,7 @@ def test_queue_preserves_order(make_orch):
     started = threading.Event()
     release = threading.Event()
 
-    def pq(text, cfg, on_state=None):
+    def pq(text, cfg, on_state=None, speak=False):
         order.append(text)
         if text == "first":
             started.set()
@@ -104,7 +104,7 @@ def test_overflow_is_rejected_busy(make_orch):
     started = threading.Event()
     release = threading.Event()
 
-    def pq(text, cfg, on_state=None):
+    def pq(text, cfg, on_state=None, speak=False):
         if text == "first":
             started.set()
             release.wait(timeout=5)
@@ -124,7 +124,7 @@ def test_overflow_is_rejected_busy(make_orch):
 
 def test_stale_command_is_dropped(make_orch):
     ran: list[str] = []
-    orch, _ev = make_orch(lambda text, cfg, on_state=None: ran.append(text) or {"reply": text})
+    orch, _ev = make_orch(lambda text, cfg, on_state=None, speak=False: ran.append(text) or {"reply": text})
     stale = Command("old", CommandSource.VOICE, speak=False, created_at=time.time() - 120)
     job = orch.wait(orch.submit(stale).job_id, timeout=3)
     assert job.state == JobState.CANCELLED
@@ -136,7 +136,7 @@ def test_cancel_clears_queue_and_interrupts(make_orch):
     started = threading.Event()
     release = threading.Event()
 
-    def pq(text, cfg, on_state=None):
+    def pq(text, cfg, on_state=None, speak=False):
         if text == "first":
             started.set()
             release.wait(timeout=5)
@@ -160,7 +160,7 @@ def test_cancel_clears_queue_and_interrupts(make_orch):
 
 def test_busy_result_marks_job_failed(make_orch):
     orch, _ev = make_orch(
-        lambda text, cfg, on_state=None: {"reply": "busy", "busy": True}
+        lambda text, cfg, on_state=None, speak=False: {"reply": "busy", "busy": True}
     )
     job = orch.wait(
         orch.submit(Command("x", CommandSource.DASHBOARD, speak=False)).job_id, timeout=3
@@ -171,7 +171,7 @@ def test_busy_result_marks_job_failed(make_orch):
 
 def test_pipeline_state_events_emitted(make_orch):
     seen: list[str] = []
-    orch, _ev = make_orch(lambda text, cfg, on_state=None: {"reply": "ok"})
+    orch, _ev = make_orch(lambda text, cfg, on_state=None, speak=False: {"reply": "ok"})
     orch._bus.subscribe(
         lambda event, payload: seen.append(payload["state"])
         if event == "pipeline.state" else None

@@ -36,6 +36,8 @@ import conversation
 import events
 from config import Config
 from memory.knowledge import get_recent_notes
+from memory.learn import record_exchange
+from memory.semantic import build_recall_context
 from memory.variables import build_variables_block
 from tools.registry import CONFIRM_REQUIRED_TOOLS, TOOL_DEFINITIONS, dispatch_tool
 from tts.cartesia import speak, stop_speech
@@ -44,6 +46,8 @@ logger = logging.getLogger("jarvis.pipeline")
 
 _interrupt = threading.Event()
 _query_lock = threading.Lock()
+_fw_model = None
+_fw_model_name: str | None = None
 # Claude calls run on this pool and stream their response; on Stop the streaming
 # helper returns early and closes the socket, which halts generation (and billing)
 # rather than letting the request finish in the background. See _create_claude_message.
@@ -63,6 +67,8 @@ SAMPLE_WIDTH = 2
 MAX_RECORD_SECONDS = 20
 POST_SPEECH_SILENCE_FRAMES = 25  # fallback if config not passed
 WAIT_FOR_SPEECH_FRAMES = int(6000 / FRAME_DURATION_MS)
+FOLLOWUP_WAIT_FRAMES = int(6000 / FRAME_DURATION_MS)
+ANSWER_WAIT_FRAMES = int(12000 / FRAME_DURATION_MS)
 PRE_ROLL_FRAMES = 8
 WAKE_THRESHOLD = 0.55
 WAKE_CONSECUTIVE_HITS = 2
@@ -97,6 +103,33 @@ def _clear_interrupt() -> None:
 
 
 _warn_state: dict[str, Any] = {"date": None}
+
+
+# Map user-facing wake_word config values to openwakeword pretrained model ids.
+WAKE_WORD_MODELS: dict[str, str] = {
+    "hey jarvis": "hey_jarvis_v0.1",
+    "alexa": "alexa_v0.1",
+}
+
+
+def resolve_wake_model(wake_word: str) -> str:
+    """Resolve config wake_word to an openwakeword model id."""
+    key = (wake_word or "hey_jarvis").lower().replace("_", " ").strip()
+    if key in WAKE_WORD_MODELS:
+        return WAKE_WORD_MODELS[key]
+    try:
+        from openwakeword import MODELS
+
+        if wake_word in MODELS:
+            return wake_word
+    except ImportError:
+        pass
+    return WAKE_WORD_MODELS.get("hey jarvis", "hey_jarvis_v0.1")
+
+
+def prepare_wake_word_model(wake_word: str) -> None:
+    """Ensure the wake word ONNX model is present (may download on first run)."""
+    _ensure_wake_model(resolve_wake_model(wake_word))
 
 
 def _ensure_wake_model(wake_word: str) -> None:
@@ -246,6 +279,7 @@ def _start_audio_thread(
 
 def _record_from_queue(
     capture_queue: "queue.Queue[bytes]",
+    wait_for_speech_frames: int = WAIT_FOR_SPEECH_FRAMES,
     *,
     silence_ms: int = 1400,
     min_capture_ms: int = 2500,
@@ -269,7 +303,7 @@ def _record_from_queue(
         except queue.Empty:
             if speech_started:
                 continue
-            if i >= WAIT_FOR_SPEECH_FRAMES:
+            if i >= wait_for_speech_frames:
                 logger.debug("🎙️  Capture timed out waiting for speech.")
                 break
             continue
@@ -321,13 +355,27 @@ def strip_wake_phrase(text: str, wake_word: str) -> str:
 
 
 def _transcribe(audio_bytes: bytes, cfg: Config) -> str:
-    import mlx_whisper  # type: ignore[import]
     import numpy as np
 
     audio_np = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
-    repo = f"mlx-community/whisper-{cfg.whisper_model}-mlx"
-    result = mlx_whisper.transcribe(audio_np, path_or_hf_repo=repo)
-    raw: str = result.get("text", "").strip()
+    model_name = cfg.effective_stt_model()
+
+    if cfg.stt_backend == "faster":
+        global _fw_model, _fw_model_name
+        from faster_whisper import WhisperModel
+
+        if _fw_model is None or _fw_model_name != model_name:
+            _fw_model = WhisperModel(model_name, compute_type="int8")
+            _fw_model_name = model_name
+        segments, _info = _fw_model.transcribe(audio_np, beam_size=1)
+        raw = " ".join(s.text for s in segments).strip()
+    else:
+        import mlx_whisper  # type: ignore[import]
+
+        repo = f"mlx-community/whisper-{model_name}-mlx"
+        result = mlx_whisper.transcribe(audio_np, path_or_hf_repo=repo)
+        raw = result.get("text", "").strip()
+
     text = strip_wake_phrase(raw, cfg.wake_word)
     if raw != text:
         logger.debug("📝 Raw transcript (pre-strip): %r", raw)
@@ -335,38 +383,124 @@ def _transcribe(audio_bytes: bytes, cfg: Config) -> str:
     return text
 
 
-def _build_system_prompt(cfg: Config) -> str:
+def _capture_and_transcribe(
+    capture_queue: "queue.Queue[bytes]",
+    capturing: threading.Event,
+    paused: threading.Event,
+    cfg: Config,
+    set_state: Callable[[str], None],
+    *,
+    wait_for_speech_frames: int = WAIT_FOR_SPEECH_FRAMES,
+) -> str | None:
+    """Record one utterance and transcribe it. Returns None if nothing was heard."""
+    set_state("LISTENING")
+    _drain_queue(capture_queue)
+    capturing.set()
+    audio_bytes = _record_from_queue(
+        capture_queue,
+        wait_for_speech_frames,
+        silence_ms=cfg.vad_silence_ms,
+        min_capture_ms=cfg.vad_min_capture_ms,
+    )
+
+    paused.set()
+    capturing.clear()
+    _drain_queue(capture_queue)
+
+    if _interrupt.is_set():
+        logger.info("⏹️  Stop during listening.")
+        return None
+
+    if len(audio_bytes) < FRAME_SIZE * SAMPLE_WIDTH * 3:
+        logger.info("⚠️  No speech captured.")
+        return None
+
+    set_state("THINKING")
+    try:
+        text = _transcribe(audio_bytes, cfg)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("⚠️  Transcription failed: %s", exc, exc_info=True)
+        return None
+
+    if not text:
+        logger.info("🤔 Nothing intelligible heard.")
+        return None
+    return text
+
+
+def warmup_stt(cfg: Config) -> None:
+    """Pre-load STT model to avoid cold-start latency on first utterance."""
+    if cfg.stt_backend == "faster":
+        global _fw_model, _fw_model_name
+        from faster_whisper import WhisperModel
+
+        name = cfg.effective_stt_model()
+        if _fw_model is None or _fw_model_name != name:
+            logger.info("🎧 Warming faster-whisper model %r…", name)
+            _fw_model = WhisperModel(name, compute_type="int8")
+            _fw_model_name = name
+    else:
+        logger.info("🎧 STT backend mlx — model loads on first transcription.")
+
+
+def _build_system_prompt(cfg: Config, query_text: str = "") -> str:
     variables_block = build_variables_block()
-    notes_block = get_recent_notes(cfg.memory_inject_last_n_notes)
+    if cfg.memory_semantic_recall and query_text.strip():
+        notes_block = build_recall_context(query_text, cfg)
+    else:
+        notes_block = get_recent_notes(cfg.memory_inject_last_n_notes)
     return (
         "You are Jarvis, a fast personal AI assistant. You are direct, honest, and never "
         "flatter. You flag uncertainty rather than guessing. You have access to tools — use "
         "them when the task requires it, not otherwise. Keep spoken responses concise (under "
         "40 words for simple questions). Recent message history may appear before the latest "
-        "user turn — use it for follow-ups. You know the following about the user:\n"
-        f"{variables_block}\n\nRecent notes:\n{notes_block}"
+        "user turn — use it for follow-ups. When the user shares durable personal facts "
+        "(preferences, relationships, routines, goals), persist them with remember, "
+        "set_variable, or write_note so future turns stay personalised. "
+        "You know the following about the user:\n"
+        f"{variables_block}\n\nRelevant memories:\n{notes_block}"
     )
 
 
-def _create_claude_message(client: anthropic.Anthropic, **kwargs: Any) -> Any:
-    """Stream a Claude message so a Stop closes the HTTP connection mid-generation.
-
-    Returns ``None`` if interrupted: exiting the stream context manager closes the
-    socket, which actually halts token generation (and billing) instead of letting
-    the request run to completion in the background.
-    """
+def _create_claude_message(
+    client: anthropic.Anthropic,
+    *,
+    stream_speak: callable | None = None,
+    **kwargs: Any,
+) -> Any:
+    """Stream a Claude message; optional sentence-boundary TTS while generating."""
     try:
         stream_cm = client.messages.stream(**kwargs)
     except (AttributeError, TypeError):
-        # Older SDKs without the streaming helper — fall back to a blocking call.
         return client.messages.create(**kwargs)
+
+    sentence_enders = {".", "?", "!", "\n"}
+    buffer = ""
+    stream_spoken = False
+
     with stream_cm as stream:
-        for _event in stream:
+        for event in stream:
             if _interrupt.is_set():
                 return None
+            if stream_speak and getattr(event, "type", None) == "content_block_delta":
+                delta = getattr(event, "delta", None)
+                text = getattr(delta, "text", "") if delta else ""
+                if text:
+                    buffer += text
+                    for i, char in enumerate(buffer):
+                        if char in sentence_enders and i > 15:
+                            sentence = buffer[: i + 1].strip()
+                            buffer = buffer[i + 1 :]
+                            if sentence and not _interrupt.is_set():
+                                stream_speak(sentence)
+                                stream_spoken = True
+                            break
         if _interrupt.is_set():
             return None
-        return stream.get_final_message()
+        final = stream.get_final_message()
+        if stream_speak and buffer.strip() and not _interrupt.is_set():
+            stream_speak(buffer.strip())
+        return final
 
 
 def _emit_pipeline_state(
@@ -383,7 +517,8 @@ def _call_claude(
     cfg: Config,
     history: list[dict[str, Any]] | None = None,
     on_state: Callable[[str], None] | None = None,
-) -> tuple[str, str, float]:
+    speak_aloud: bool = False,
+) -> tuple[str, str, float, bool]:
     client = anthropic.Anthropic(
         api_key=cfg.anthropic_api_key,
         timeout=CLAUDE_HTTP_TIMEOUT_SEC,
@@ -393,17 +528,25 @@ def _call_claude(
 
     messages: list[dict[str, Any]] = list(history or [])
     messages.append({"role": "user", "content": text})
-    system_prompt = _build_system_prompt(cfg)
+    system_prompt = _build_system_prompt(cfg, query_text=text)
     total_cost = 0.0
+    stream_spoken = False
+
+    def _maybe_stream_speak(sentence: str) -> None:
+        nonlocal stream_spoken
+        if speak_aloud and cfg.streaming_tts and not _interrupt.is_set():
+            speak(sentence, voice_id=cfg.cartesia_voice_id)
+            stream_spoken = True
 
     for _round_idx in range(5):
         if _interrupt.is_set():
             logger.info("⏹️  Claude loop aborted (interrupt).")
-            return "", model, total_cost
+            return "", model, total_cost, stream_spoken
 
         future: Future[Any] = _claude_executor.submit(
             _create_claude_message,
             client,
+            stream_speak=_maybe_stream_speak if speak_aloud and cfg.streaming_tts else None,
             model=model,
             max_tokens=1024,
             system=system_prompt,
@@ -413,7 +556,7 @@ def _call_claude(
         while not future.done():
             if _interrupt.is_set():
                 logger.info("⏹️  Stop during Claude — abandoning in-flight request.")
-                return "", model, total_cost
+                return "", model, total_cost, stream_spoken
             time.sleep(0.25)
 
         try:
@@ -421,17 +564,16 @@ def _call_claude(
         except Exception as exc:  # noqa: BLE001
             logger.error("⚠️  Claude API error: %s", exc, exc_info=True)
             if _interrupt.is_set():
-                return "", model, total_cost
-            return "Sorry, I couldn't reach my brain. Please try again.", model, total_cost
+                return "", model, total_cost, stream_spoken
+            return "Sorry, I couldn't reach my brain. Please try again.", model, total_cost, stream_spoken
 
         if response is None:
-            # Streaming call was cancelled mid-flight — connection already closed.
             logger.info("⏹️  Claude stream cancelled — no tokens charged past cut-off.")
-            return "", model, total_cost
+            return "", model, total_cost, stream_spoken
 
         if _interrupt.is_set():
             logger.info("⏹️  Claude loop aborted after response (interrupt).")
-            return "", model, total_cost
+            return "", model, total_cost, stream_spoken
 
         total_cost += costs.log_usage(model, getattr(response, "usage", None), text)
 
@@ -444,14 +586,14 @@ def _call_claude(
                 tool_uses.append({"id": block.id, "name": block.name, "input": block.input})
 
         if not tool_uses:
-            return reply_text.strip(), model, total_cost
+            return reply_text.strip(), model, total_cost, stream_spoken
 
         messages.append({"role": "assistant", "content": response.content})
         tool_results: list[dict[str, Any]] = []
         for tu in tool_uses:
             if _interrupt.is_set():
                 logger.info("⏹️  Tool dispatch skipped (interrupt).")
-                return reply_text.strip() or "Stopped.", model, total_cost
+                return reply_text.strip() or "Stopped.", model, total_cost, stream_spoken
             logger.info("🔧 Tool: %s(%s)", tu["name"], tu["input"])
             needs_confirm = (
                 cfg.confirm_before_execute and tu["name"] in CONFIRM_REQUIRED_TOOLS
@@ -463,7 +605,7 @@ def _call_claude(
                     speak(CONFIRM_PROMPT, voice_id=cfg.cartesia_voice_id)
             if _interrupt.is_set():
                 logger.info("⏹️  Tool confirm skipped (interrupt).")
-                return reply_text.strip() or "Stopped.", model, total_cost
+                return reply_text.strip() or "Stopped.", model, total_cost, stream_spoken
             result = dispatch_tool(
                 tu["name"],
                 tu["input"],
@@ -476,7 +618,7 @@ def _call_claude(
             logger.info("   → %s", result[:120])
             if _interrupt.is_set():
                 logger.info("⏹️  Cycle aborted during tool confirm.")
-                return reply_text.strip() or "Stopped.", model, total_cost
+                return reply_text.strip() or "Stopped.", model, total_cost, stream_spoken
             tool_results.append({
                 "type": "tool_result",
                 "tool_use_id": tu["id"],
@@ -484,7 +626,7 @@ def _call_claude(
             })
         messages.append({"role": "user", "content": tool_results})
 
-    return "I ran into an issue completing that. Please try again.", model, total_cost
+    return "I ran into an issue completing that. Please try again.", model, total_cost, stream_spoken
 
 
 def _should_warn_80() -> bool:
@@ -525,6 +667,7 @@ def process_query(
     text: str,
     cfg: Config,
     on_state: Callable[[str], None] | None = None,
+    speak: bool = False,
 ) -> dict:
     if not _query_lock.acquire(blocking=False):
         logger.warning("⏳ Query rejected — another request is in flight.")
@@ -563,14 +706,18 @@ def process_query(
             cfg.conversation_history_turns,
             cfg.conversation_history_max_chars,
         )
-        reply, model, cost = _call_claude(text, cfg, history=history, on_state=on_state)
+        reply, model, cost, stream_spoken = _call_claude(
+            text, cfg, history=history, on_state=on_state, speak_aloud=speak,
+        )
         latency_ms = int((time.time() - t0) * 1000)
         if _should_store_in_history(reply):
             conversation.add_turn(text, reply)
+            record_exchange(text, reply, cfg)
         events.record_conversation(text, reply or "(interrupted)", model, latency_ms, cost)
         logger.info("💰 Call cost $%.4f (%dms) — %s", cost, latency_ms, model)
         return {"reply": reply, "warning": warning, "capped": False, "busy": False,
-                "model": model, "latency_ms": latency_ms, "cost": cost}
+                "model": model, "latency_ms": latency_ms, "cost": cost,
+                "stream_spoken": stream_spoken}
     finally:
         _query_lock.release()
 
@@ -609,7 +756,7 @@ def run_pipeline(
     wake_event = threading.Event()
     audio_stop = threading.Event()
 
-    current_wake_word = cfg.wake_word
+    current_wake_word = resolve_wake_model(cfg.wake_word)
     _ensure_wake_model(current_wake_word)
     audio_thread = _start_audio_thread(
         wake_event, capture_queue, capturing, paused, audio_stop, current_wake_word,
@@ -620,13 +767,14 @@ def run_pipeline(
             try:
                 cfg = Config.load()
 
-                if cfg.wake_word != current_wake_word:
+                resolved = resolve_wake_model(cfg.wake_word)
+                if resolved != current_wake_word:
                     logger.info("🔁 Wake word changed to %r — rebuilding listener.", cfg.wake_word)
                     audio_stop.set()
                     if audio_thread is not None:
                         audio_thread.join(timeout=5.0)
-                    _ensure_wake_model(cfg.wake_word)
-                    current_wake_word = cfg.wake_word
+                    _ensure_wake_model(resolved)
+                    current_wake_word = resolved
                     audio_stop = threading.Event()
                     audio_thread = _start_audio_thread(
                         wake_event, capture_queue, capturing, paused, audio_stop, current_wake_word,
@@ -665,59 +813,71 @@ def run_pipeline(
                     _drain_queue(capture_queue)
                     continue
 
-                set_state("LISTENING")
-                if not capturing.is_set():
-                    capturing.set()
-                audio_bytes = _record_from_queue(
-                    capture_queue,
-                    silence_ms=cfg.vad_silence_ms,
-                    min_capture_ms=cfg.vad_min_capture_ms,
+                text = _capture_and_transcribe(
+                    capture_queue, capturing, paused, cfg, set_state,
                 )
-
-                paused.set()
-                capturing.clear()
-                _drain_queue(capture_queue)
-
-                if _interrupt.is_set():
-                    logger.info("⏹️  Cycle aborted after listening.")
-                    set_state("IDLE")
+                if text is None:
                     continue
 
-                if len(audio_bytes) < FRAME_SIZE * SAMPLE_WIDTH * 3:
-                    logger.info("⚠️  No speech captured — ignoring.")
-                    continue
+                # Process the wake-triggered query, then keep listening for
+                # follow-ups without repeating the wake word.
+                while text is not None:
+                    if _interrupt.is_set():
+                        logger.info("⏹️  Cycle aborted.")
+                        set_state("IDLE")
+                        break
 
-                set_state("THINKING")
-                try:
-                    text = _transcribe(audio_bytes, cfg)
-                except Exception as exc:  # noqa: BLE001
-                    logger.error("⚠️  Transcription failed: %s", exc, exc_info=True)
-                    continue
+                    sub = orchestrator.submit(
+                        Command(text=text, source=CommandSource.VOICE, speak=True)
+                    )
+                    if not sub.accepted:
+                        logger.warning("⏳ Queue full — voice command rejected.")
+                        speak(BUSY_MESSAGE, voice_id=cfg.cartesia_voice_id)
+                        set_state("IDLE")
+                        break
 
-                if _interrupt.is_set():
-                    set_state("IDLE")
-                    continue
+                    job = orchestrator.wait(sub.job_id, timeout=VOICE_JOB_TIMEOUT_SEC)
+                    push_budget_level(cfg)
+                    if job is not None and job.reply:
+                        logger.info("💬 Reply: %s", job.reply)
 
-                if not text:
-                    logger.info("🤔 Nothing intelligible heard — back to listening.")
-                    continue
+                    if _interrupt.is_set():
+                        logger.info("⏹️  Cycle aborted.")
+                        set_state("IDLE")
+                        break
 
-                # Hand the turn to the orchestrator: it serialises against the
-                # dashboard, runs the query, drives THINKING/WAITING_CONFIRM/
-                # SPEAKING, and speaks the reply. We keep the mic paused and wait
-                # for the turn to finish so Jarvis never captures its own voice.
-                sub = orchestrator.submit(
-                    Command(text=text, source=CommandSource.VOICE, speak=True)
-                )
-                if not sub.accepted:
-                    logger.warning("⏳ Queue full — dropping this voice command.")
-                    set_state("IDLE")
-                    continue
+                    if job is not None and job.capped:
+                        break
 
-                job = orchestrator.wait(sub.job_id, timeout=VOICE_JOB_TIMEOUT_SEC)
-                push_budget_level(cfg)
-                if job is not None and job.reply:
-                    logger.info("💬 Reply: %s", job.reply)
+                    awaiting_answer = bool(job and job.reply and job.reply.rstrip().endswith("?"))
+                    wait_frames = ANSWER_WAIT_FRAMES if awaiting_answer else FOLLOWUP_WAIT_FRAMES
+                    time.sleep(0.4)
+                    paused.clear()
+                    logger.info(
+                        "👂 %s…",
+                        "Waiting for your answer" if awaiting_answer else "Listening for follow-up",
+                    )
+                    text = _capture_and_transcribe(
+                        capture_queue,
+                        capturing,
+                        paused,
+                        cfg,
+                        set_state,
+                        wait_for_speech_frames=wait_frames,
+                    )
+                    if text is None and awaiting_answer and not _interrupt.is_set():
+                        logger.info("👂 Still listening for your answer…")
+                        paused.clear()
+                        text = _capture_and_transcribe(
+                            capture_queue,
+                            capturing,
+                            paused,
+                            cfg,
+                            set_state,
+                            wait_for_speech_frames=wait_frames,
+                        )
+                    if text is None:
+                        break
 
             except Exception as exc:  # noqa: BLE001
                 logger.error("⚠️  Pipeline cycle failed: %s", exc, exc_info=True)

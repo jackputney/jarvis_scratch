@@ -50,3 +50,16 @@ def test_spend_summary_pct(temp_env):
     summary = costs.get_spend_summary(daily_budget=2.0, monthly_budget=40.0)
     assert summary["today"] == pytest.approx(1.0)
     assert summary["daily_pct"] == pytest.approx(50.0)
+
+
+def test_daily_tool_count(temp_env):
+    costs.log_tool_run("web_search", {"query": "jarvis"}, "ok", True)
+    costs.log_tool_run("get_variable", {"key": "x"}, "done", True)
+    assert costs.get_daily_tool_count() == 2
+
+
+def test_daily_query_count(temp_env):
+    import events
+
+    events.record_conversation("hello", "hi back", "claude-haiku-4-5", 42, 0.001)
+    assert costs.get_daily_query_count() >= 1

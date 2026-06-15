@@ -26,7 +26,7 @@ function hubToast(msg, kind = "info") {
   const el = document.createElement("div");
   el.className = "toast " + kind;
   el.textContent = msg;
-  hub$("toasts").appendChild(el);
+  (hub$("toast-container") || hub$("toasts")).appendChild(el);
   setTimeout(() => el.remove(), 3200);
 }
 
@@ -62,19 +62,24 @@ function renderSetupGrid() {
   const grid = hub$("hub-setup-grid");
   grid.innerHTML = "";
   _integrations.forEach((item) => {
+    const comingSoon = item.coming_soon || item.status === "coming_soon";
     const card = document.createElement("button");
     card.type = "button";
-    card.className = "hub-int-card color-" + (item.color || "gray");
+    card.className = "hub-int-card color-" + (item.color || "gray") + (comingSoon ? " coming-soon" : "");
+    card.disabled = comingSoon;
+    const badge = comingSoon ? `<span class="soon-badge">Coming soon</span>` : "";
     card.innerHTML =
       `<div class="hub-int-top"><i class="${hubEsc(item.icon || "ti-plug")}"></i>` +
-      `<span class="status-dot ${item.connected ? "on" : "off"}"></span></div>` +
+      `<span class="status-dot ${item.connected ? "on" : "off"}"></span>${badge}</div>` +
       `<div class="hub-int-name">${hubEsc(item.name)}</div>` +
       `<div class="hub-int-desc">${hubEsc(item.description)}</div>` +
-      `<div class="hub-int-label">${hubEsc(item.label || (item.connected ? "Connected" : "Not connected"))}</div>`;
-    card.onclick = () => {
-      if (item.connected) return;
-      openConnectionsFor(item.id);
-    };
+      `<div class="hub-int-label">${hubEsc(item.label || (comingSoon ? "Coming soon" : (item.connected ? "Connected" : "Not connected")))}</div>`;
+    if (!comingSoon) {
+      card.onclick = () => {
+        if (item.connected) return;
+        openConnectionsFor(item.id);
+      };
+    }
     grid.appendChild(card);
   });
 }
@@ -83,12 +88,15 @@ function renderConnections() {
   const list = hub$("hub-connections-list");
   list.innerHTML = "";
   _integrations.forEach((item) => {
+    const comingSoon = item.coming_soon || item.status === "coming_soon";
     const section = document.createElement("section");
-    section.className = "hub-conn card";
+    section.className = "hub-conn card" + (comingSoon ? " coming-soon" : "");
     section.id = `conn-${item.id}`;
 
     let body = "";
-    if (item.auth_type === "oauth") {
+    if (comingSoon) {
+      body = `<p class="sub">${hubEsc(item.description)}</p><p class="soon-badge">Coming soon — not available yet.</p>`;
+    } else if (item.auth_type === "oauth") {
       body =
         `<p class="sub">${hubEsc(item.description)}</p>` +
         `<p class="conn-status">${item.connected ? "✅ Connected" : "⚪ Not connected"}</p>` +

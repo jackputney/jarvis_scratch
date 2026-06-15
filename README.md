@@ -139,8 +139,10 @@ and the orb subscribe to. See `orchestrator/QUEUE_POLICY.md`.
 | `web_search` | DuckDuckGo instant answer lookup |
 | `set_variable` | Persist a personal fact (e.g. `home_city=London`) |
 | `get_variable` | Retrieve a stored fact |
-| `write_note` | Save a Markdown note to `memory/knowledge/` |
+| `write_note` | Save a Markdown note to your memory folder |
 | `read_note` | Read a note by title |
+| `remember` | Persist a durable personal fact to your local profile |
+| `search_memory` | Search notes, diary, and profile by meaning |
 | `get_calendar_events` | Upcoming Google Calendar events (read-only) |
 | `get_todays_schedule` | Today's calendar, formatted for speech |
 | `get_unread_emails` | Unread Gmail summaries (read-only) |
@@ -158,12 +160,19 @@ For better speech recognition, set `"whisper_model": "small"` in `config.json` o
 
 ## Memory
 
-Two-tier local storage — never leaves your machine:
+Local semantic memory — never leaves your machine. Assign any folder via **`memory_root_path`** in `config.json` (e.g. `~/JarvisMemory`) or the dashboard **Settings → Memory folder**.
 
-- **`memory/variables.db`** — SQLite key-value store for structured facts injected into every prompt.
-- **`memory/knowledge/`** — Markdown files (one per topic); the 5 most recently modified are injected into every prompt.
+| Store | What it holds |
+|-------|----------------|
+| **`variables.db`** | Structured facts (name, city, preferences) injected into every prompt |
+| **`notes/`** | Markdown topic notes Jarvis can read and write |
+| **`profile.md`** | Durable facts Jarvis learns via the `remember` tool |
+| **`diary/`** | Daily conversation log when auto-learn is enabled |
+| **`semantic_index.db`** | Local FTS index for relevant recall (not just recency) |
 
-Both paths are gitignored.
+With **semantic recall** on (default), each query pulls the most relevant memories into the prompt. With **auto-learn** on (default), every completed turn is saved to today's diary so Jarvis keeps improving over time.
+
+Both paths are gitignored. Inspect or edit the folder directly anytime.
 
 ## UI states
 

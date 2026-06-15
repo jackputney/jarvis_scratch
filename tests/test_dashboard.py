@@ -94,7 +94,7 @@ def test_message_busy_returns_409(client, temp_env, monkeypatch):
     monkeypatch.setattr(
         pipeline,
         "process_query",
-        lambda text, cfg, on_state=None: {
+        lambda text, cfg, on_state=None, speak=False: {
             "reply": pipeline.BUSY_MESSAGE,
             "busy": True,
             "model": "(busy)",
@@ -137,13 +137,27 @@ def test_tool_run_requires_name(client):
     assert r.status_code == 400
 
 
+def test_sse_replays_initial_state():
+    from dashboard.app import _initial_sse_payloads
+
+    payloads = _initial_sse_payloads()
+    assert payloads
+    joined = " ".join(payloads)
+    assert "pipeline.state" in joined or '"type": "state"' in joined
+
+
+def test_api_metrics_shape(client):
+    data = client.get("/api/metrics").get_json()
+    assert {"uptime_seconds", "uptime_display", "queries_today", "tools_today"} <= data.keys()
+
+
 def test_message_happy_path_returns_reply(client, temp_env, monkeypatch):
     import pipeline
 
     monkeypatch.setattr(
         pipeline,
         "process_query",
-        lambda text, cfg, on_state=None: {
+        lambda text, cfg, on_state=None, speak=False: {
             "reply": "hello back",
             "busy": False,
             "model": "m",

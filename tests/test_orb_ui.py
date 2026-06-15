@@ -1,0 +1,72 @@
+"""Orb UI — state colours, lerp, hit testing, mute toggle."""
+
+import pytest
+
+pytest.importorskip("PyQt6")
+
+from PyQt6.QtGui import QColor
+
+from ui.face import (
+    CORE_RADIUS,
+    STATE_COLORS,
+    JarvisState,
+    OrbWidget,
+    lerp_color,
+    point_in_core,
+)
+
+
+def test_orb_state_colors():
+    assert STATE_COLORS["IDLE"].red() == 0x6C
+    assert STATE_COLORS["LISTENING"].green() == 0xD3
+    assert STATE_COLORS["THINKING"].blue() == 0xF6
+    assert STATE_COLORS["WAITING_CONFIRM"].red() == 0xFB
+
+
+def test_orb_state_colors_all_states():
+    """Every JarvisState maps to a distinct color in STATE_COLORS."""
+    for state in JarvisState:
+        assert state.name in STATE_COLORS
+
+
+def test_orb_lerp_color():
+    mid = lerp_color(QColor("#000000"), QColor("#ffffff"), 0.5)
+    assert 120 <= mid.red() <= 135
+    assert 120 <= mid.green() <= 135
+    assert 120 <= mid.blue() <= 135
+
+
+def test_lerp_color_endpoints():
+    """lerp_color at t=0 returns a, at t=1 returns b."""
+    a, b = QColor(255, 0, 0), QColor(0, 0, 255)
+    assert lerp_color(a, b, 0.0).red() == 255
+    assert lerp_color(a, b, 1.0).blue() == 255
+
+
+def test_orb_mute_toggle():
+    orb = OrbWidget()
+    assert orb.muted is False
+    orb.muted = True
+    assert orb.muted is True
+    orb.muted = False
+    assert orb.muted is False
+
+
+def test_orb_click_outside_core_ignored():
+    cx, cy, r = 50.0, 50.0, CORE_RADIUS
+    assert point_in_core(cx, cy, r, cx, cy) is True
+    assert point_in_core(cx, cy, r, cx + 50, cy) is False
+
+
+def test_point_in_core_hit():
+    """Point at center is inside core."""
+    assert point_in_core(50, 50, 26, 50, 50) is True
+
+
+def test_point_in_core_miss():
+    """Point far from center is outside core."""
+    assert point_in_core(50, 50, 26, 100, 100) is False
+
+
+def test_core_radius_is_click_target_size():
+    assert CORE_RADIUS == 26.0

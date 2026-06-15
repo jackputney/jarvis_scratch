@@ -9,10 +9,12 @@ dashboard and the voice loop never race.
 
 Endpoints:
   GET  /                  → the dashboard page
+  GET  /api/metrics        → session uptime + daily query/tool counts
   GET  /api/state         → pipeline state, mute, uptime, models, spend, log
   GET  /api/events        → Server-Sent Events stream of job/pipeline events
   GET  /api/tools         → tool definitions + risk tier (read/write/high)
-  POST /api/tools/run     → {name, inputs} → execute a tool directly, return result
+  POST /api/tools/run     → {name, inputs} or {confirm_id, confirmed} for high-risk tools
+  POST /hooks/<plugin_id> → webhook trigger for plugin automations
   POST /api/config        → update editable settings/budgets (writes config.json)
   GET  /api/variables     → all memory variables
   POST /api/variables     → add/edit a variable {key, value}
@@ -37,6 +39,7 @@ import json
 import logging
 import queue
 import threading
+import time
 
 from flask import Flask, Response, jsonify, request
 
@@ -50,6 +53,7 @@ logger = logging.getLogger("jarvis.dashboard")
 
 HOST = "127.0.0.1"
 PORT = 7777
+_START_TIME = time.time()
 
 # -- Server-Sent Events fan-out ---------------------------------------------
 # The orchestrator emits job/state events on the shared bus; we mirror them to
@@ -94,6 +98,24 @@ def _pending_confirm() -> dict | None:
         return None
 
 
+def _initial_sse_payloads() -> list[str]:
+    """Catch-up events for new SSE subscribers (state + pending confirm)."""
+    state = events.get_state()
+    payloads = [
+        json.dumps({
+            "event": "pipeline.state",
+            "state": state["pipeline_state"],
+            "type": "state",
+            "pipeline_state": state["pipeline_state"],
+            "muted": state["muted"],
+        }),
+    ]
+    pending = _pending_confirm()
+    if pending:
+        payloads.append(json.dumps({"event": "confirm.pending", "type": "confirm", **pending}))
+    return payloads
+
+
 def create_app() -> Flask:
     app = Flask(__name__, static_folder="static", template_folder="templates")
     app.config["JSON_SORT_KEYS"] = False
@@ -124,6 +146,18 @@ def create_app() -> Flask:
             "pending_confirm": _pending_confirm(),
         })
 
+    @app.route("/api/metrics")
+    def api_metrics():  # noqa: ANN202
+        uptime = int(time.time() - _START_TIME)
+        hours, rem = divmod(uptime, 3600)
+        minutes = rem // 60
+        return jsonify({
+            "uptime_seconds": uptime,
+            "uptime_display": f"{hours}h {minutes}m" if hours else f"{minutes}m",
+            "queries_today": costs.get_daily_query_count(),
+            "tools_today": costs.get_daily_tool_count(),
+        })
+
     # -- Real-time event stream (SSE) --------------------------------------
     @app.route("/api/events")
     def api_events():  # noqa: ANN202
@@ -133,6 +167,8 @@ def create_app() -> Flask:
                 _sse_clients.add(client)
             try:
                 yield "retry: 3000\n\n"
+                for msg in _initial_sse_payloads():
+                    yield f"data: {msg}\n\n"
                 while True:
                     try:
                         msg = client.get(timeout=_SSE_KEEPALIVE_SEC)
@@ -192,15 +228,40 @@ def create_app() -> Flask:
         if not isinstance(inputs, dict):
             return jsonify({"ok": False, "error": "inputs must be an object"}), 400
 
-        from tools.registry import TOOL_DISPATCH, dispatch_tool
+        from dashboard.tools_run_confirm import consume, create_pending
+        from tools.registry import CONFIRM_REQUIRED_TOOLS, TOOL_DISPATCH, dispatch_tool
 
         if name not in TOOL_DISPATCH:
             return jsonify({"ok": False, "error": f"Unknown tool: {name}"}), 404
 
-        # A dashboard run is an explicit user action — it IS the confirmation, so
-        # the voice-mode confirm gate is bypassed here.
+        confirm_id = (body.get("confirm_id") or "").strip()
+        confirmed = bool(body.get("confirmed"))
+
+        if name in CONFIRM_REQUIRED_TOOLS:
+            if confirm_id and confirmed:
+                entry = consume(confirm_id)
+                if entry is None:
+                    return jsonify({"ok": False, "error": "confirm_id expired or invalid"}), 400
+                if entry["tool"] != name or entry["inputs"] != inputs:
+                    return jsonify({"ok": False, "error": "confirm mismatch"}), 400
+            elif not confirm_id:
+                cid = create_pending(name, inputs)
+                return jsonify({
+                    "ok": False,
+                    "confirm_required": True,
+                    "confirm_id": cid,
+                    "tool": name,
+                    "inputs": inputs,
+                })
+            else:
+                return jsonify({"ok": False, "error": "confirmed must be true to execute"}), 400
+
         result = dispatch_tool(name, inputs, confirm=False)
         failed = result.startswith("Tool error") or result.startswith("Unknown tool")
+        try:
+            costs.log_tool_run(name, inputs, result, ok=not failed)
+        except Exception:  # noqa: BLE001
+            logger.debug("tool run log failed", exc_info=True)
         try:
             from orchestrator.runtime import get_bus
 
@@ -253,6 +314,38 @@ def create_app() -> Flask:
     def api_note_delete(title: str):  # noqa: ANN202
         removed = knowledge.delete_note(title)
         return jsonify({"ok": removed})
+
+    # -- Semantic memory ----------------------------------------------------
+    @app.route("/api/memory/info")
+    def api_memory_info():  # noqa: ANN202
+        from memory import store
+
+        root = store.resolve_memory_root()
+        profile = store.profile_path()
+        return jsonify({
+            "root": str(root),
+            "notes_dir": str(store.notes_dir()),
+            "profile_exists": profile.is_file(),
+            "note_count": len(knowledge.list_notes()),
+        })
+
+    @app.route("/api/memory/search")
+    def api_memory_search():  # noqa: ANN202
+        from memory import semantic
+
+        query = (request.args.get("q") or "").strip()
+        if not query:
+            return jsonify({"ok": False, "error": "q is required"}), 400
+        limit = int(request.args.get("limit") or 8)
+        hits = semantic.search(query, top_k=max(1, min(limit, 20)))
+        return jsonify({"ok": True, "query": query, "hits": hits})
+
+    @app.route("/api/memory/reindex", methods=["POST"])
+    def api_memory_reindex():  # noqa: ANN202
+        from memory import semantic
+
+        count = semantic.reindex_all()
+        return jsonify({"ok": True, "chunks": count})
 
     # -- Text message into the pipeline (no STT/TTS) ------------------------
     @app.route("/api/message", methods=["POST"])
@@ -313,6 +406,37 @@ def create_app() -> Flask:
     @app.route("/api/plugins")
     def api_plugins_list():  # noqa: ANN202
         return jsonify({"plugins": list_plugin_manifests()})
+
+    @app.route("/hooks/<plugin_id>", methods=["POST"])
+    def webhook_handler(plugin_id: str):  # noqa: ANN202
+        from plugins.loader import discover_plugins
+        from orchestrator.runtime import get_orchestrator
+        from orchestrator.types import Command, CommandSource
+
+        plugins = discover_plugins()
+        matched = None
+        target = f"hooks/{plugin_id.strip('/')}"
+        for plugin in plugins:
+            trigger = plugin.get("trigger", {})
+            if trigger.get("type") != "webhook":
+                continue
+            path = (trigger.get("path") or "").strip("/")
+            if path == target or plugin.get("_slug") == plugin_id or plugin.get("name") == plugin_id:
+                matched = plugin
+                break
+        if matched is None:
+            return jsonify({"error": f"No plugin matches webhook '{plugin_id}'"}), 404
+        if not matched.get("enabled", True):
+            return jsonify({"error": "Plugin is disabled"}), 403
+
+        payload = request.get_json(silent=True) or {}
+        prompt = (matched.get("prompt") or "").strip()
+        full_prompt = f"{prompt}\n\nWebhook payload: {json.dumps(payload)[:2000]}"
+        orch = get_orchestrator()
+        sub = orch.submit(Command(text=full_prompt, source=CommandSource.WEBHOOK, speak=False))
+        if not sub.accepted:
+            return jsonify({"error": "Queue full"}), 429
+        return jsonify({"ok": True, "job_id": sub.job_id})
 
     return app
 

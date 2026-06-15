@@ -11,16 +11,20 @@ import sqlite3
 import threading
 from pathlib import Path
 
-DB_PATH = Path(__file__).parent / "variables.db"
+from memory import store
 
 _init_lock = threading.Lock()
 _initialised = False
 
+# Legacy alias — tests may patch this; connect() uses store.variables_db_path().
+DB_PATH = Path(__file__).parent / "variables.db"
+
 
 def connect(timeout: float = 5.0) -> sqlite3.Connection:
     """Open the shared Jarvis DB (WAL mode, busy timeout)."""
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH, timeout=timeout)
+    path = store.variables_db_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path, timeout=timeout)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=5000")
     return conn
@@ -59,10 +63,37 @@ def init_db() -> None:
                     latency_ms INTEGER,
                     cost_usd REAL
                 );
+                CREATE TABLE IF NOT EXISTS tool_runs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    tool_name TEXT NOT NULL,
+                    inputs TEXT,
+                    result TEXT,
+                    ok INTEGER NOT NULL
+                );
                 """
             )
             conn.commit()
         _initialised = True
+
+
+def enforce_retention(retention_days: int = 90) -> None:
+    """Delete old usage and conversation rows."""
+    days = max(1, int(retention_days))
+    with connect() as conn:
+        conn.execute(
+            "DELETE FROM usage_log WHERE timestamp < datetime('now', ?)",
+            (f"-{days} days",),
+        )
+        conn.execute(
+            "DELETE FROM conversations WHERE timestamp < datetime('now', ?)",
+            (f"-{days} days",),
+        )
+        conn.execute(
+            "DELETE FROM tool_runs WHERE timestamp < datetime('now', ?)",
+            (f"-{days} days",),
+        )
+        conn.commit()
 
 
 def reset_init_flag_for_tests() -> None:

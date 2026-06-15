@@ -88,6 +88,14 @@ def test_hub_registry_status_missing_key(monkeypatch):
     assert status["connected"] is False
 
 
+def test_hub_coming_soon_always_disconnected():
+    load_integrations.cache_clear()
+    status = get_status("notion")
+    assert status["connected"] is False
+    assert status["label"] == "Coming soon"
+    assert status.get("coming_soon") is True
+
+
 def test_hub_plugin_generate_manifest_shape(client, hub_env, monkeypatch):
     manifest = {
         "name": "urgent_email_monitor",

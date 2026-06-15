@@ -248,6 +248,38 @@ def _iter_cartesia_audio(text: str, voice_id: str, api_key: str) -> Iterator[byt
                 yield audio
 
 
+def _iter_cartesia_stream(
+    text_chunks: Iterator[str], voice_id: str, api_key: str
+) -> Iterator[bytes]:
+    """Yield PCM bytes for a stream of text chunks (sentences) in order."""
+    from cartesia import Cartesia
+
+    client = Cartesia(api_key=api_key)
+    for chunk in text_chunks:
+        if _cancel.is_set():
+            return
+        text = chunk.strip()
+        if not text:
+            continue
+        events = client.tts.generate_sse(
+            model_id="sonic-2",
+            transcript=text,
+            voice={"mode": "id", "id": voice_id},
+            output_format={
+                "container": "raw",
+                "encoding": "pcm_s16le",
+                "sample_rate": SAMPLE_RATE,
+            },
+        )
+        for event in events:
+            if _cancel.is_set():
+                return
+            if getattr(event, "type", None) == "chunk":
+                audio = getattr(event, "audio", None)
+                if audio:
+                    yield audio
+
+
 def _speak_cartesia(
     text: str,
     voice_id: str,
@@ -290,3 +322,41 @@ def speak(
         _speak_cartesia(text, voice_id, on_first_chunk)
     else:
         _speak_local(text)
+
+
+def speak_stream(
+    text_chunks: Iterator[str],
+    voice_id: str = "a0e99841-438c-4a64-b679-ae501e7d6091",
+    on_first_chunk: Callable[[], None] | None = None,
+) -> None:
+    """Speak a stream of text chunks as they arrive (sentence-boundary streaming).
+
+    Cartesia audio for each chunk feeds one continuous output stream. Falls back
+    to local TTS per chunk when CARTESIA_API_KEY is unset. Blocks until playback
+    finishes or stop_speech().
+    """
+    _cancel.clear()
+    api_key = os.environ.get("CARTESIA_API_KEY", "")
+
+    if not api_key:
+        for chunk in text_chunks:
+            if _cancel.is_set():
+                return
+            text = chunk.strip()
+            if not text:
+                continue
+            if on_first_chunk is not None:
+                on_first_chunk()
+                on_first_chunk = None
+            _speak_local(text)
+        return
+
+    try:
+        _play_pcm_stream(_iter_cartesia_stream(text_chunks, voice_id, api_key), on_first_chunk)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("⚠️  Cartesia TTS error (%s) — falling back to local TTS", exc)
+        for chunk in text_chunks:
+            if _cancel.is_set():
+                return
+            if chunk and chunk.strip():
+                _speak_local(chunk.strip())

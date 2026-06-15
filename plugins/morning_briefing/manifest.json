@@ -1,0 +1,12 @@
+{
+  "name": "morning_briefing",
+  "description": "Daily morning summary of calendar, email, and weather",
+  "trigger": {
+    "type": "cron",
+    "schedule": "0 8 * * *"
+  },
+  "prompt": "Give me a morning briefing: summarize my calendar events for today, check my top 5 unread emails, and get the current weather for my location. Keep it concise — this is a spoken summary.",
+  "risk_tier": "read_only",
+  "requires": ["google", "weather"],
+  "enabled": true
+}

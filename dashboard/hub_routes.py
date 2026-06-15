@@ -30,6 +30,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 ENV_PATH = PROJECT_ROOT / ".env"
 PLUGINS_DIR = PROJECT_ROOT / "plugins"
 
+from plugins.manifest import validate_manifest
+
 PLUGIN_GENERATOR_PROMPT = """You generate Jarvis plugin manifests. Return ONLY valid JSON matching this schema — no explanation, no markdown fences:
 {
   "name": string (snake_case),
@@ -248,6 +250,9 @@ def api_hub_plugins_generate():  # noqa: ANN202
         parts = [block.text for block in response.content if getattr(block, "type", None) == "text"]
         raw = "".join(parts)
         manifest = _parse_manifest_json(raw)
+        err = validate_manifest(manifest)
+        if err:
+            return jsonify({"error": err, "raw": raw}), 422
     except json.JSONDecodeError:
         return jsonify({"error": "Claude returned invalid JSON", "raw": raw}), 422
     except Exception as exc:  # noqa: BLE001

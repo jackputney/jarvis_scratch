@@ -29,12 +29,22 @@
   {
     "id": "google",
     "name": "Google Workspace",
-    "description": "Gmail · Calendar · Sheets",
+    "description": "Gmail · Calendar · Sheets · Drive · Contacts",
     "icon": "ti-brand-google",
     "color": "blue",
     "auth_type": "oauth",
     "required": false,
     "oauth_action": "/api/hub/google/auth",
+    "fields": []
+  },
+  {
+    "id": "weather",
+    "name": "Weather",
+    "description": "Current conditions and forecast (Open-Meteo)",
+    "icon": "ti-cloud",
+    "color": "teal",
+    "auth_type": "none",
+    "required": false,
     "fields": []
   },
   {
@@ -84,6 +94,7 @@
     "color": "gray",
     "auth_type": "api_key",
     "required": false,
+    "status": "coming_soon",
     "fields": [
       { "key": "HA_URL", "label": "Instance URL", "required": true, "secret": false, "placeholder": "http://homeassistant.local:8123" },
       { "key": "HA_TOKEN", "label": "Long-lived token", "required": true, "secret": true }
@@ -98,6 +109,7 @@
     "color": "pink",
     "auth_type": "api_key",
     "required": false,
+    "status": "coming_soon",
     "fields": [
       { "key": "NOTION_TOKEN", "label": "Integration token", "required": true, "secret": true, "placeholder": "secret_..." }
     ],

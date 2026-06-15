@@ -126,8 +126,18 @@ def get_status(integration_id: str, config: Config | None = None) -> dict[str, A
                 "label": "Unknown",
                 "detail": "Integration not found",
             }
+        if integration.get("status") == "coming_soon":
+            return {
+                "id": integration_id,
+                "connected": False,
+                "label": "Coming soon",
+                "detail": "Not available yet",
+                "coming_soon": True,
+            }
         cfg = config or Config.load()
         auth_type = integration.get("auth_type", "api_key")
+        if auth_type == "none":
+            return {"id": integration_id, "connected": True, "label": "Available", "detail": None}
         if auth_type == "oauth":
             return _oauth_status(integration_id)
         return _api_key_status(integration, cfg)

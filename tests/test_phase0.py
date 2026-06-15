@@ -13,15 +13,15 @@ from tools.system import open_app, validate_app_name
 
 
 def test_process_query_rejects_concurrent_calls(temp_env, monkeypatch):
-    monkeypatch.setattr(pipeline, "_call_claude", lambda *a, **k: ("ok", "m", 0.0))
+    monkeypatch.setattr(pipeline, "_call_claude", lambda *a, **k: ("ok", "m", 0.0, False))
     lock = threading.Lock()
     started = threading.Event()
     release = threading.Event()
 
-    def slow_call(text, cfg, history=None, on_state=None):
+    def slow_call(text, cfg, history=None, on_state=None, speak_aloud=False):
         started.set()
         release.wait(timeout=2)
-        return "done", "m", 0.0
+        return "done", "m", 0.0, False
 
     monkeypatch.setattr(pipeline, "_call_claude", slow_call)
 
@@ -74,6 +74,7 @@ def test_open_app_rejects_injection():
 
 def test_open_app_uses_open_cli(monkeypatch):
     calls: list[list[str]] = []
+    monkeypatch.setattr("tools.system.platform.system", lambda: "Darwin")
     monkeypatch.setattr(
         "tools.system.subprocess.run",
         lambda cmd, **kw: calls.append(cmd) or type("R", (), {"returncode": 0, "stderr": "", "stdout": ""})(),
@@ -91,7 +92,7 @@ def test_send_email_rejects_invalid_address():
 def test_monthly_budget_cap(temp_env, monkeypatch):
     monkeypatch.setattr(pipeline.costs, "get_spend", lambda period: 50.0 if period == "month" else 0.0)
     calls = []
-    monkeypatch.setattr(pipeline, "_call_claude", lambda *a, **k: calls.append(1) or ("x", "m", 0.0))
+    monkeypatch.setattr(pipeline, "_call_claude", lambda *a, **k: calls.append(1) or ("x", "m", 0.0, False))
     cfg = Config(daily_budget_usd=2.0, monthly_budget_usd=40.0)
     result = pipeline.process_query("hello", cfg)
     assert result["capped"] is True
@@ -103,7 +104,7 @@ def test_interrupted_reply_not_stored_in_history(temp_env, monkeypatch):
     import conversation
 
     conversation.clear_history()
-    monkeypatch.setattr(pipeline, "_call_claude", lambda *a, **k: ("Stopped.", "m", 0.0))
+    monkeypatch.setattr(pipeline, "_call_claude", lambda *a, **k: ("Stopped.", "m", 0.0, False))
     pipeline._interrupt.set()
     try:
         pipeline.process_query("hello", Config())
@@ -165,7 +166,7 @@ def test_confirm_ux_waiting_state_and_speech(temp_env, monkeypatch):
         states.append(name)
 
     cfg = Config(confirm_before_execute=True)
-    reply, _model, _cost = pipeline._call_claude(
+    reply, _model, _cost, _stream = pipeline._call_claude(
         "send an email",
         cfg,
         on_state=on_state,

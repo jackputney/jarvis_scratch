@@ -127,3 +127,39 @@ def get_spend_summary(daily_budget: float, monthly_budget: float) -> dict:
         "monthly_budget": monthly_budget,
         "daily_pct": round(100.0 * today / daily_budget, 1) if daily_budget > 0 else 0.0,
     }
+
+
+def get_daily_query_count() -> int:
+    """Count of conversation turns logged today."""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM conversations WHERE date(timestamp) = date('now')"
+        ).fetchone()
+    return int(row[0]) if row else 0
+
+
+def get_daily_tool_count() -> int:
+    """Count of tool runs logged today."""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM tool_runs WHERE date(timestamp) = date('now')"
+        ).fetchone()
+    return int(row[0]) if row else 0
+
+
+def log_tool_run(tool_name: str, inputs: dict, result: str, ok: bool) -> None:
+    """Record a dashboard or direct tool execution."""
+    import json
+
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO tool_runs (timestamp, tool_name, inputs, result, ok) VALUES (?, ?, ?, ?, ?)",
+            (
+                datetime.now().isoformat(),
+                tool_name,
+                json.dumps(inputs)[:2000],
+                (result or "")[:2000],
+                1 if ok else 0,
+            ),
+        )
+        conn.commit()

@@ -27,6 +27,8 @@ SCOPES = [
     "https://www.googleapis.com/auth/gmail.send",
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive.readonly",
+    "https://www.googleapis.com/auth/contacts.readonly",
+    "https://www.googleapis.com/auth/contacts.other.readonly",
 ]
 
 
@@ -83,6 +85,9 @@ def get_credentials() -> Credentials:
 def get_google_service(api_name: str, api_version: str) -> Resource:
     """Build an authenticated Google API client."""
     return build(api_name, api_version, credentials=get_credentials(), cache_discovery=False)
+
+
+get_service = get_google_service
 
 
 def ensure_google_ready(*, interactive: bool = True) -> bool:

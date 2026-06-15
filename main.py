@@ -20,6 +20,7 @@ Run with:
 from __future__ import annotations
 
 import logging
+import platform
 import sys
 import threading
 
@@ -32,14 +33,82 @@ from config import Config
 
 # Emoji-rich, single-line log output for the console (see project conventions).
 logging.basicConfig(level=logging.INFO, format="%(message)s")
+logger = logging.getLogger("jarvis")
 
 DASHBOARD_URL = "http://127.0.0.1:7777"
 
 
+def _resolve_stt_backend(cfg: Config) -> str:
+    """Pick a working STT backend for this machine."""
+    if cfg.stt_backend == "mlx":
+        try:
+            import mlx_whisper  # noqa: F401
+            return "mlx"
+        except ImportError:
+            logger.warning("⚠️  mlx-whisper unavailable — trying faster-whisper")
+            try:
+                from faster_whisper import WhisperModel  # noqa: F401
+                return "faster"
+            except ImportError:
+                logger.error(
+                    "❌  No STT backend available. Install mlx-whisper (macOS) "
+                    "or faster-whisper (Windows/Linux)."
+                )
+                raise SystemExit(1) from None
+    return cfg.stt_backend
+
+
 def _init_persistence() -> None:
-    from memory.db import init_db
+    from memory.db import enforce_retention, init_db
+    from memory import semantic, store
 
     init_db()
+    cfg = Config.load()
+    enforce_retention(cfg.db_retention_days)
+    store.resolve_memory_root()
+    store.notes_dir()
+    store.diary_dir()
+    semantic.reindex_all()
+
+
+_scheduler = None
+
+
+def _init_automation() -> None:
+    global _scheduler
+    from orchestrator.runtime import get_orchestrator
+    from plugins.loader import discover_plugins
+    from plugins.scheduler import PluginScheduler
+
+    orch = get_orchestrator()
+    plugins = discover_plugins()
+    _scheduler = PluginScheduler(orch)
+    scheduled = _scheduler.register_plugins(plugins)
+    print(f"   🔌 Plugins        : {len(plugins)} loaded · {scheduled} scheduled")
+
+
+def _warmup_voice(cfg: Config) -> None:
+    try:
+        from pipeline import warmup_stt
+
+        warmup_stt(cfg)
+    except Exception as exc:  # noqa: BLE001
+        print(f"⚠️  STT warm-up skipped ({exc}).")
+
+
+def _prepare_wake_word(cfg: Config) -> None:
+    """Download wake word model before the pipeline thread starts (first-run UX)."""
+    if not cfg.wake_word_enabled:
+        return
+    try:
+        from pipeline import prepare_wake_word_model
+
+        prepare_wake_word_model(cfg.wake_word)
+    except RuntimeError as exc:
+        print(f"⚠️  {exc}")
+        print("   Wake word detection will not work until the model downloads (internet required on first launch).")
+    except Exception as exc:  # noqa: BLE001
+        print(f"⚠️  Could not prepare wake word model ({exc}).")
 
 
 def _prepare_google(cfg: Config) -> None:
@@ -88,12 +157,18 @@ def _start_dashboard() -> None:
 
 def _print_banner(cfg: Config) -> None:
     trigger = cfg.wake_word.replace("_", " ")
+    resolved_stt = _resolve_stt_backend(cfg)
+    print(f"🖥️  Platform       : {platform.system()} {platform.machine()}")
     print("🤖 Jarvis is up.")
     print(f"   🗣️  Trigger phrase : “{trigger}”" + ("" if cfg.wake_word_enabled else "  (voice disabled)"))
     print(f"   📊 Dashboard      : {DASHBOARD_URL}")
     print(f"   🧠 Models         : {cfg.claude_model_fast} (fast) / {cfg.claude_model_smart} (smart)")
-    print(f"   🎧 Whisper        : {cfg.whisper_model}")
+    print(f"   🎧 Whisper        : {cfg.stt_model} ({resolved_stt})")
     print(f"   💰 Budget         : ${cfg.daily_budget_usd:.2f}/day · ${cfg.monthly_budget_usd:.2f}/month")
+    from memory import store
+
+    mem_root = store.resolve_memory_root(cfg)
+    print(f"   🧠 Memory folder  : {mem_root}")
     confirm_label = (
         "dashboard (high-risk only)"
         if cfg.confirm_before_execute
@@ -122,6 +197,8 @@ def _run_with_ui(cfg: Config) -> None:
     face.show_overlay()
 
     stop_event = threading.Event()
+    _warmup_voice(cfg)
+    _init_automation()
 
     def state_callback(state_name: str) -> None:
         try:
@@ -147,6 +224,8 @@ def _run_with_ui(cfg: Config) -> None:
         sys.exit(app.exec())
     except SystemExit:
         stop_event.set()
+        if _scheduler is not None:
+            _scheduler.shutdown()
 
 
 def _run_headless(cfg: Config) -> None:
@@ -154,6 +233,8 @@ def _run_headless(cfg: Config) -> None:
     from pipeline import run_pipeline
 
     stop_event = threading.Event()
+    _warmup_voice(cfg)
+    _init_automation()
     pipeline_thread = threading.Thread(
         target=run_pipeline,
         kwargs={"cfg": cfg, "state_callback": None, "stop_event": stop_event},
@@ -166,6 +247,8 @@ def _run_headless(cfg: Config) -> None:
     except KeyboardInterrupt:
         print("\n👋 Shutting down Jarvis.")
         stop_event.set()
+        if _scheduler is not None:
+            _scheduler.shutdown()
 
 
 def main() -> None:
@@ -173,6 +256,7 @@ def main() -> None:
     _check_keys(cfg)
     _init_persistence()
     _prepare_google(cfg)
+    _prepare_wake_word(cfg)
     _start_dashboard()
     _print_banner(cfg)
 

@@ -7,7 +7,10 @@
 # Anthropic Claude API
 anthropic==0.107.1
 
-# STT — Apple Silicon accelerated Whisper (mlx + Metal backend)
+# STT backends (set stt_backend in config.json)
+# mlx-whisper is default for Apple Silicon; faster-whisper for cross-platform
+faster-whisper>=1.0.0
+
 mlx-whisper==0.4.3
 mlx==0.31.2
 mlx-metal==0.31.2

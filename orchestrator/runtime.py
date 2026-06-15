@@ -25,10 +25,10 @@ def get_bus() -> EventBus:
     return _bus
 
 
-def _default_process_query(text: str, cfg: Any, on_state=None) -> dict:
+def _default_process_query(text: str, cfg: Any, on_state=None, speak: bool = False) -> dict:
     import pipeline
 
-    return pipeline.process_query(text, cfg, on_state=on_state)
+    return pipeline.process_query(text, cfg, on_state=on_state, speak=speak)
 
 
 def _default_speak(text: str, voice_id: str | None = None) -> None:
@@ -45,7 +45,13 @@ def get_orchestrator() -> Orchestrator:
     with _lock:
         if _orchestrator is None:
             from config import Config
+            import events
 
+            def _sync_legacy(event: str, payload: dict) -> None:
+                if event == "pipeline.state":
+                    events.set_pipeline_state(payload.get("state", "IDLE"))
+
+            _bus.subscribe(_sync_legacy)
             _orchestrator = Orchestrator(
                 bus=_bus,
                 process_query=_default_process_query,

@@ -163,7 +163,9 @@ class Orchestrator:
         self._set_state("THINKING")
         cfg = self._config_loader() if self._config_loader else None
         try:
-            result = self._process_query(command.text, cfg, on_state=self._set_state)
+            result = self._process_query(
+                command.text, cfg, on_state=self._set_state, speak=command.speak,
+            )
             job.reply = result.get("reply", "")
             job.warning = result.get("warning")
             job.model = result.get("model")
@@ -185,6 +187,7 @@ class Orchestrator:
                 and bool(job.reply.strip())
                 and job.state in (JobState.DONE, JobState.FAILED)
                 and not self._interrupt_set()
+                and not bool(result.get("stream_spoken"))
             )
             if speakable:
                 spoken = f"{job.warning} {job.reply}" if job.warning else job.reply
@@ -200,6 +203,8 @@ class Orchestrator:
             self._set_state("IDLE")
             self._emit("job.state", job_id=command.id, state=job.state.value)
             job.done_event.set()
+            if job.state in (JobState.DONE, JobState.FAILED, JobState.CANCELLED):
+                threading.Timer(300, lambda jid=command.id: self._jobs.pop(jid, None)).start()
         return job
 
     # -- helpers ------------------------------------------------------------
