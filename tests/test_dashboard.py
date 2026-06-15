@@ -94,7 +94,7 @@ def test_message_busy_returns_409(client, temp_env, monkeypatch):
     monkeypatch.setattr(
         pipeline,
         "process_query",
-        lambda text, cfg, on_state=None, speak=False: {
+        lambda text, cfg, on_state=None, speak=False, on_sentence=None: {
             "reply": pipeline.BUSY_MESSAGE,
             "busy": True,
             "model": "(busy)",
@@ -157,7 +157,7 @@ def test_message_happy_path_returns_reply(client, temp_env, monkeypatch):
     monkeypatch.setattr(
         pipeline,
         "process_query",
-        lambda text, cfg, on_state=None, speak=False: {
+        lambda text, cfg, on_state=None, speak=False, on_sentence=None: {
             "reply": "hello back",
             "busy": False,
             "model": "m",

@@ -32,3 +32,10 @@ def test_contacts_list_mocked():
         result = list_contacts(2)
     assert "Oliver Smith" in result
     assert "Jane Doe" in result
+
+
+def test_get_contact_names_dedupes():
+    with patch("tools.google_contacts._all_contacts", return_value=_mock_people()):
+        from tools.google_contacts import get_contact_names
+
+        assert get_contact_names() == ["Oliver Smith", "Jane Doe"]

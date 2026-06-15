@@ -18,6 +18,7 @@ See orchestrator/QUEUE_POLICY.md for the queue-depth decision.
 from __future__ import annotations
 
 import logging
+import queue
 import threading
 import time
 from collections import deque
@@ -162,10 +163,51 @@ class Orchestrator:
                    source=command.source.value)
         self._set_state("THINKING")
         cfg = self._config_loader() if self._config_loader else None
+        sentence_q: queue.Queue[str | None] | None = None
+        tts_thread: threading.Thread | None = None
+        use_stream_tts = (
+            command.speak
+            and cfg is not None
+            and getattr(cfg, "streaming_tts", True)
+        )
         try:
-            result = self._process_query(
-                command.text, cfg, on_state=self._set_state, speak=command.speak,
-            )
+            if use_stream_tts:
+                sentence_q = queue.Queue()
+
+                def _sentence_iter():
+                    while True:
+                        item = sentence_q.get()
+                        if item is None:
+                            return
+                        yield item
+
+                def _run_stream_tts() -> None:
+                    from tts.cartesia import speak_stream
+
+                    voice_id = getattr(cfg, "cartesia_voice_id", None)
+                    speak_stream(
+                        _sentence_iter(),
+                        voice_id=voice_id or "a0e99841-438c-4a64-b679-ae501e7d6091",
+                        on_first_chunk=lambda: self._set_state("SPEAKING"),
+                    )
+
+                tts_thread = threading.Thread(
+                    target=_run_stream_tts,
+                    daemon=True,
+                    name="jarvis-tts-stream",
+                )
+                tts_thread.start()
+                result = self._process_query(
+                    command.text,
+                    cfg,
+                    on_state=self._set_state,
+                    speak=False,
+                    on_sentence=sentence_q.put,
+                )
+            else:
+                result = self._process_query(
+                    command.text, cfg, on_state=self._set_state, speak=command.speak,
+                )
             job.reply = result.get("reply", "")
             job.warning = result.get("warning")
             job.model = result.get("model")
@@ -200,6 +242,17 @@ class Orchestrator:
             if not job.reply:
                 job.reply = "Sorry, something went wrong handling that."
         finally:
+            if sentence_q is not None:
+                sentence_q.put(None)
+            if tts_thread is not None:
+                while tts_thread.is_alive():
+                    if self._interrupt_set():
+                        from tts.cartesia import stop_speech
+
+                        stop_speech()
+                        break
+                    tts_thread.join(timeout=0.1)
+                tts_thread.join()
             self._set_state("IDLE")
             self._emit("job.state", job_id=command.id, state=job.state.value)
             job.done_event.set()

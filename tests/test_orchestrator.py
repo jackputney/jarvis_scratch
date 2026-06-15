@@ -12,6 +12,7 @@ from orchestrator.types import Command, CommandSource, JobState
 
 class _FakeCfg:
     cartesia_voice_id = "voice-x"
+    streaming_tts = False
 
 
 @pytest.fixture
@@ -20,11 +21,11 @@ def make_orch():
 
     def _factory(process_query, speak=None, **kwargs):
         ev = threading.Event()
+        kwargs.setdefault("config_loader", _FakeCfg)
         orch = Orchestrator(
             bus=EventBus(),
             process_query=process_query,
             speak=speak,
-            config_loader=_FakeCfg,
             interrupt_event=ev,
             request_interrupt=ev.set,
             clear_interrupt=ev.clear,
@@ -167,6 +168,31 @@ def test_busy_result_marks_job_failed(make_orch):
     )
     assert job.state == JobState.FAILED
     assert job.error == "busy"
+
+
+def test_voice_command_uses_streaming_tts_when_enabled(make_orch, monkeypatch):
+    spoken: list[str] = []
+    monkeypatch.setattr(
+        "tts.cartesia.speak_stream",
+        lambda chunks, **kw: spoken.extend(list(chunks)),
+    )
+
+    class Cfg:
+        cartesia_voice_id = "voice-x"
+        streaming_tts = True
+
+    def pq(text, cfg, on_state=None, speak=False, on_sentence=None):
+        if on_sentence:
+            on_sentence("First sentence.")
+        return {"reply": "First sentence.", "model": "m", "stream_spoken": True}
+
+    orch, _ev = make_orch(pq, config_loader=lambda: Cfg())
+    job = orch.wait(
+        orch.submit(Command("hello", CommandSource.VOICE, speak=True)).job_id,
+        timeout=5,
+    )
+    assert job.state == JobState.DONE
+    assert spoken == ["First sentence."]
 
 
 def test_pipeline_state_events_emitted(make_orch):

@@ -29,7 +29,11 @@ from typing import Any
 
 import anthropic
 import pyaudio
-import webrtcvad
+
+try:
+    import webrtcvad
+except ImportError:
+    webrtcvad = None  # type: ignore[assignment,misc]
 
 import costs
 import conversation
@@ -40,7 +44,7 @@ from memory.learn import record_exchange
 from memory.semantic import build_recall_context
 from memory.variables import build_variables_block
 from tools.registry import CONFIRM_REQUIRED_TOOLS, TOOL_DEFINITIONS, dispatch_tool
-from tts.cartesia import speak, stop_speech
+from tts.cartesia import speak, speak_stream, stop_speech
 
 logger = logging.getLogger("jarvis.pipeline")
 
@@ -48,6 +52,7 @@ _interrupt = threading.Event()
 _query_lock = threading.Lock()
 _fw_model = None
 _fw_model_name: str | None = None
+_hotwords_cache: dict[str, Any] = {"ts": 0.0, "value": ""}
 # Claude calls run on this pool and stream their response; on Stop the streaming
 # helper returns early and closes the socket, which halts generation (and billing)
 # rather than letting the request finish in the background. See _create_claude_message.
@@ -73,6 +78,18 @@ PRE_ROLL_FRAMES = 8
 WAKE_THRESHOLD = 0.55
 WAKE_CONSECUTIVE_HITS = 2
 AUDIO_THREAD_RESTART_DELAY = 2.0
+ENERGY_VAD_THRESHOLD = 250
+HOTWORDS_TTL_SECONDS = 600
+
+STATIC_SYSTEM_INSTRUCTIONS = (
+    "You are Jarvis, a fast personal AI assistant. You are direct, honest, and never "
+    "flatter. You flag uncertainty rather than guessing. You have access to tools — use "
+    "them when the task requires it, not otherwise. Keep spoken responses concise (under "
+    "40 words for simple questions). Recent message history may appear before the latest "
+    "user turn — use it for follow-ups. When the user shares durable personal facts "
+    "(preferences, relationships, routines, goals), persist them with remember, "
+    "set_variable, or write_note so future turns stay personalised."
+)
 
 WARN_80_MESSAGE = "Heads up, I'm at 80 percent of today's budget."
 CAP_MESSAGE = "I've hit today's budget cap — raise it in the dashboard if you need me."
@@ -180,6 +197,26 @@ def _drain_queue(q: "queue.Queue[bytes]") -> None:
             return
 
 
+def _is_speech_energy(data: bytes) -> bool:
+    """Lightweight energy-based speech detector — fallback when webrtcvad is absent."""
+    import numpy as np
+
+    audio = np.frombuffer(data, dtype=np.int16)
+    if audio.size == 0:
+        return False
+    rms = float(np.sqrt(np.mean(audio.astype(np.float64) ** 2)))
+    return rms > ENERGY_VAD_THRESHOLD
+
+
+def _read_audio_frame(stream: Any, *, use_sounddevice: bool) -> bytes:
+    if use_sounddevice:
+        data, _overflowed = stream.read(FRAME_SIZE)
+        import numpy as np
+
+        return np.asarray(data, dtype=np.int16).reshape(-1).tobytes()
+    return stream.read(FRAME_SIZE, exception_on_overflow=False)
+
+
 def _audio_loop(
     wake_event: threading.Event,
     capture_queue: "queue.Queue[bytes]",
@@ -192,20 +229,41 @@ def _audio_loop(
     from openwakeword.model import Model
 
     oww_model = Model(wakeword_models=[wake_word], inference_framework="onnx")
-    pa = pyaudio.PyAudio()
-    stream = pa.open(
-        rate=AUDIO_RATE,
-        channels=CHANNELS,
-        format=PA_FORMAT,
-        input=True,
-        frames_per_buffer=FRAME_SIZE,
-    )
+    use_sounddevice = False
+    sd_stream = None
+    pa = None
+    pa_stream = None
+
+    try:
+        import sounddevice as sd
+
+        sd_stream = sd.InputStream(
+            samplerate=AUDIO_RATE,
+            channels=CHANNELS,
+            dtype="int16",
+            blocksize=FRAME_SIZE,
+        )
+        sd_stream.start()
+        use_sounddevice = True
+        logger.info("🎤 Audio input: sounddevice")
+    except Exception as exc:  # noqa: BLE001
+        logger.info("🎤 Audio input: PyAudio (sounddevice unavailable: %s)", exc)
+        pa = pyaudio.PyAudio()
+        pa_stream = pa.open(
+            rate=AUDIO_RATE,
+            channels=CHANNELS,
+            format=PA_FORMAT,
+            input=True,
+            frames_per_buffer=FRAME_SIZE,
+        )
+
+    stream = sd_stream if use_sounddevice else pa_stream
     logger.info("👂 Wake word listener active — say '%s' to activate", wake_word)
 
     was_inactive = False
     try:
         while not audio_stop.is_set():
-            data = stream.read(FRAME_SIZE, exception_on_overflow=False)
+            data = _read_audio_frame(stream, use_sounddevice=use_sounddevice)
 
             if capturing.is_set():
                 capture_queue.put(data)
@@ -228,16 +286,19 @@ def _audio_loop(
                 if all(scores[-i] > WAKE_THRESHOLD for i in range(1, WAKE_CONSECUTIVE_HITS + 1)):
                     logger.info("🎙️  Wake word '%s' detected (score=%.2f)", name, scores[-1])
                     _reset_oww(oww_model)
-                    # Capture from this frame forward — do NOT replay pre-roll
-                    # (that included the wake phrase and made VAD end too early).
                     capture_queue.put(data)
                     capturing.set()
                     wake_event.set()
                     break
     finally:
-        stream.stop_stream()
-        stream.close()
-        pa.terminate()
+        if use_sounddevice and sd_stream is not None:
+            sd_stream.stop()
+            sd_stream.close()
+        elif pa_stream is not None:
+            pa_stream.stop_stream()
+            pa_stream.close()
+        if pa is not None:
+            pa.terminate()
 
 
 def _start_audio_thread(
@@ -284,7 +345,7 @@ def _record_from_queue(
     silence_ms: int = 1400,
     min_capture_ms: int = 2500,
 ) -> bytes:
-    vad = webrtcvad.Vad(2)
+    vad = webrtcvad.Vad(2) if webrtcvad else None
     frames: list[bytes] = []
     silent_frames = 0
     speech_started = False
@@ -308,7 +369,7 @@ def _record_from_queue(
                 break
             continue
 
-        is_speech = vad.is_speech(data, AUDIO_RATE)
+        is_speech = vad.is_speech(data, AUDIO_RATE) if vad else _is_speech_energy(data)
         if is_speech:
             speech_started = True
             silent_frames = 0
@@ -354,6 +415,30 @@ def strip_wake_phrase(text: str, wake_word: str) -> str:
     return cleaned
 
 
+def _stt_hotwords() -> str:
+    """Contact names for faster-whisper hotword biasing (cached 10 min)."""
+    now = time.time()
+    if now - _hotwords_cache["ts"] < HOTWORDS_TTL_SECONDS:
+        return _hotwords_cache["value"]
+
+    _hotwords_cache["ts"] = now
+    try:
+        from tools.google_contacts import get_contact_names
+
+        names = get_contact_names()
+    except Exception:  # noqa: BLE001
+        names = []
+    _hotwords_cache["value"] = ", ".join(names)
+    if names:
+        logger.info("🎯 STT biased toward %d contact names", len(names))
+    return _hotwords_cache["value"]
+
+
+def warm_stt_caches() -> None:
+    """Pre-fetch contact hotwords so the first transcription skips Google latency."""
+    threading.Thread(target=_stt_hotwords, daemon=True, name="jarvis-hotwords").start()
+
+
 def _transcribe(audio_bytes: bytes, cfg: Config) -> str:
     import numpy as np
 
@@ -367,7 +452,14 @@ def _transcribe(audio_bytes: bytes, cfg: Config) -> str:
         if _fw_model is None or _fw_model_name != model_name:
             _fw_model = WhisperModel(model_name, compute_type="int8")
             _fw_model_name = model_name
-        segments, _info = _fw_model.transcribe(audio_np, beam_size=1)
+        hotwords = _stt_hotwords() or None
+        segments, _info = _fw_model.transcribe(
+            audio_np,
+            beam_size=5,
+            language="en",
+            vad_filter=True,
+            hotwords=hotwords,
+        )
         raw = " ".join(s.text for s in segments).strip()
     else:
         import mlx_whisper  # type: ignore[import]
@@ -429,7 +521,8 @@ def _capture_and_transcribe(
 
 
 def warmup_stt(cfg: Config) -> None:
-    """Pre-load STT model to avoid cold-start latency on first utterance."""
+    """Pre-load STT model and contact hotwords."""
+    warm_stt_caches()
     if cfg.stt_backend == "faster":
         global _fw_model, _fw_model_name
         from faster_whisper import WhisperModel
@@ -443,64 +536,99 @@ def warmup_stt(cfg: Config) -> None:
         logger.info("🎧 STT backend mlx — model loads on first transcription.")
 
 
-def _build_system_prompt(cfg: Config, query_text: str = "") -> str:
+def _build_system_blocks(cfg: Config, query_text: str = "") -> list[dict[str, Any]]:
+    """System prompt split into a cacheable static block and dynamic user context."""
     variables_block = build_variables_block()
     if cfg.memory_semantic_recall and query_text.strip():
         notes_block = build_recall_context(query_text, cfg)
     else:
         notes_block = get_recent_notes(cfg.memory_inject_last_n_notes)
-    return (
-        "You are Jarvis, a fast personal AI assistant. You are direct, honest, and never "
-        "flatter. You flag uncertainty rather than guessing. You have access to tools — use "
-        "them when the task requires it, not otherwise. Keep spoken responses concise (under "
-        "40 words for simple questions). Recent message history may appear before the latest "
-        "user turn — use it for follow-ups. When the user shares durable personal facts "
-        "(preferences, relationships, routines, goals), persist them with remember, "
-        "set_variable, or write_note so future turns stay personalised. "
-        "You know the following about the user:\n"
-        f"{variables_block}\n\nRelevant memories:\n{notes_block}"
-    )
+    return [
+        {
+            "type": "text",
+            "cache_control": {"type": "ephemeral"},
+            "text": STATIC_SYSTEM_INSTRUCTIONS,
+        },
+        {
+            "type": "text",
+            "text": f"You know the following about the user:\n{variables_block}\n\n"
+            f"Relevant memories:\n{notes_block}",
+        },
+    ]
+
+
+def _build_system_prompt(cfg: Config, query_text: str = "") -> str:
+    """Flat system prompt for callers that do not use block caching."""
+    blocks = _build_system_blocks(cfg, query_text)
+    return blocks[0]["text"] + "\n\n" + blocks[1]["text"]
+
+
+class _SentenceEmitter:
+    """Split streamed text deltas into speakable sentence chunks."""
+
+    _BOUNDARY = re.compile(r"[.!?…\n]")
+    _SOFT_CAP = 180
+
+    def __init__(self, emit: Callable[[str], None]) -> None:
+        self._emit = emit
+        self._buf = ""
+
+    def feed(self, delta: str) -> None:
+        self._buf += delta
+        while True:
+            match = self._BOUNDARY.search(self._buf)
+            if match:
+                end = match.end()
+                chunk = self._buf[:end].strip()
+                self._buf = self._buf[end:].lstrip()
+                if chunk:
+                    self._emit(chunk)
+                continue
+            if len(self._buf) >= self._SOFT_CAP:
+                cut = self._buf.rfind(" ", 0, self._SOFT_CAP)
+                if cut <= 0:
+                    break
+                chunk = self._buf[:cut].strip()
+                self._buf = self._buf[cut:].lstrip()
+                if chunk:
+                    self._emit(chunk)
+                continue
+            break
+
+    def flush(self) -> None:
+        chunk = self._buf.strip()
+        self._buf = ""
+        if chunk:
+            self._emit(chunk)
 
 
 def _create_claude_message(
     client: anthropic.Anthropic,
     *,
-    stream_speak: callable | None = None,
+    on_sentence: Callable[[str], None] | None = None,
     **kwargs: Any,
 ) -> Any:
-    """Stream a Claude message; optional sentence-boundary TTS while generating."""
+    """Stream a Claude message; optional sentence-boundary callback while generating."""
     try:
         stream_cm = client.messages.stream(**kwargs)
     except (AttributeError, TypeError):
         return client.messages.create(**kwargs)
 
-    sentence_enders = {".", "?", "!", "\n"}
-    buffer = ""
-    stream_spoken = False
+    emitter = _SentenceEmitter(on_sentence) if on_sentence else None
 
     with stream_cm as stream:
-        for event in stream:
+        for delta in stream.text_stream:
             if _interrupt.is_set():
                 return None
-            if stream_speak and getattr(event, "type", None) == "content_block_delta":
-                delta = getattr(event, "delta", None)
-                text = getattr(delta, "text", "") if delta else ""
-                if text:
-                    buffer += text
-                    for i, char in enumerate(buffer):
-                        if char in sentence_enders and i > 15:
-                            sentence = buffer[: i + 1].strip()
-                            buffer = buffer[i + 1 :]
-                            if sentence and not _interrupt.is_set():
-                                stream_speak(sentence)
-                                stream_spoken = True
-                            break
+            if emitter is not None:
+                emitter.feed(delta)
         if _interrupt.is_set():
             return None
         final = stream.get_final_message()
-        if stream_speak and buffer.strip() and not _interrupt.is_set():
-            stream_speak(buffer.strip())
-        return final
+
+    if emitter is not None:
+        emitter.flush()
+    return final
 
 
 def _emit_pipeline_state(
@@ -517,7 +645,7 @@ def _call_claude(
     cfg: Config,
     history: list[dict[str, Any]] | None = None,
     on_state: Callable[[str], None] | None = None,
-    speak_aloud: bool = False,
+    on_sentence: Callable[[str], None] | None = None,
 ) -> tuple[str, str, float, bool]:
     client = anthropic.Anthropic(
         api_key=cfg.anthropic_api_key,
@@ -528,15 +656,18 @@ def _call_claude(
 
     messages: list[dict[str, Any]] = list(history or [])
     messages.append({"role": "user", "content": text})
-    system_prompt = _build_system_prompt(cfg, query_text=text)
+    system_blocks = _build_system_blocks(cfg, query_text=text)
     total_cost = 0.0
     stream_spoken = False
 
-    def _maybe_stream_speak(sentence: str) -> None:
+    def _emit_sentence(sentence: str) -> None:
         nonlocal stream_spoken
-        if speak_aloud and cfg.streaming_tts and not _interrupt.is_set():
-            speak(sentence, voice_id=cfg.cartesia_voice_id)
-            stream_spoken = True
+        if _interrupt.is_set() or not on_sentence:
+            return
+        stream_spoken = True
+        on_sentence(sentence)
+
+    sentence_cb = _emit_sentence if on_sentence else None
 
     for _round_idx in range(5):
         if _interrupt.is_set():
@@ -546,10 +677,10 @@ def _call_claude(
         future: Future[Any] = _claude_executor.submit(
             _create_claude_message,
             client,
-            stream_speak=_maybe_stream_speak if speak_aloud and cfg.streaming_tts else None,
+            on_sentence=sentence_cb,
             model=model,
             max_tokens=1024,
-            system=system_prompt,
+            system=system_blocks,
             tools=TOOL_DEFINITIONS,
             messages=messages,
         )
@@ -668,6 +799,7 @@ def process_query(
     cfg: Config,
     on_state: Callable[[str], None] | None = None,
     speak: bool = False,
+    on_sentence: Callable[[str], None] | None = None,
 ) -> dict:
     if not _query_lock.acquire(blocking=False):
         logger.warning("⏳ Query rejected — another request is in flight.")
@@ -701,13 +833,16 @@ def process_query(
             warning = WARN_80_MESSAGE
             logger.warning("⚠️  80%% of daily budget used ($%.2f).", spend_today)
 
+        if warning and on_sentence and not _interrupt.is_set():
+            on_sentence(warning)
+
         t0 = time.time()
         history = conversation.build_messages(
             cfg.conversation_history_turns,
             cfg.conversation_history_max_chars,
         )
         reply, model, cost, stream_spoken = _call_claude(
-            text, cfg, history=history, on_state=on_state, speak_aloud=speak,
+            text, cfg, history=history, on_state=on_state, on_sentence=on_sentence,
         )
         latency_ms = int((time.time() - t0) * 1000)
         if _should_store_in_history(reply):

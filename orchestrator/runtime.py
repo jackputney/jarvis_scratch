@@ -1,12 +1,4 @@
-"""Process-wide orchestrator singleton + event bus.
-
-Both the voice loop and the dashboard talk to the *same* Orchestrator so they
-share one queue instead of racing on a lock. The bus is exposed separately so
-surfaces (dashboard SSE, loggers) can subscribe without building the worker.
-
-The default backends dispatch dynamically through ``pipeline`` so monkeypatching
-``pipeline.process_query`` / ``pipeline.speak`` in tests is always honoured.
-"""
+"""Process-wide orchestrator singleton + event bus."""
 
 from __future__ import annotations
 
@@ -25,10 +17,18 @@ def get_bus() -> EventBus:
     return _bus
 
 
-def _default_process_query(text: str, cfg: Any, on_state=None, speak: bool = False) -> dict:
+def _default_process_query(
+    text: str,
+    cfg: Any,
+    on_state=None,
+    speak: bool = False,
+    on_sentence=None,
+) -> dict:
     import pipeline
 
-    return pipeline.process_query(text, cfg, on_state=on_state, speak=speak)
+    return pipeline.process_query(
+        text, cfg, on_state=on_state, speak=speak, on_sentence=on_sentence,
+    )
 
 
 def _default_speak(text: str, voice_id: str | None = None) -> None:

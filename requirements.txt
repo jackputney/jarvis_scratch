@@ -21,6 +21,7 @@ onnxruntime==1.26.0
 
 # Audio I/O
 PyAudio==0.2.14
+sounddevice>=0.4.6
 
 # Voice Activity Detection
 webrtcvad==2.0.10

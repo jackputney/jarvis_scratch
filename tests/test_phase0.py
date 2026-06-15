@@ -18,7 +18,7 @@ def test_process_query_rejects_concurrent_calls(temp_env, monkeypatch):
     started = threading.Event()
     release = threading.Event()
 
-    def slow_call(text, cfg, history=None, on_state=None, speak_aloud=False):
+    def slow_call(text, cfg, history=None, on_state=None, on_sentence=None, **kwargs):
         started.set()
         release.wait(timeout=2)
         return "done", "m", 0.0, False
@@ -185,8 +185,12 @@ def test_create_claude_message_cancels_stream_on_interrupt():
     pipeline._interrupt.clear()
 
     class FakeStream:
-        def __iter__(self):
-            yield from (1, 2, 3, 4, 5)
+        @property
+        def text_stream(self):
+            for i in range(5):
+                if pipeline._interrupt.is_set():
+                    return
+                yield str(i)
 
         def get_final_message(self):
             return "FINAL"

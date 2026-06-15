@@ -112,3 +112,15 @@ def list_contacts(count: int = 10) -> str:
     if not people:
         return "No contacts found."
     return "\n".join(_format_person(p) for p in people)
+
+
+def get_contact_names(limit: int = 200) -> list[str]:
+    """Return display names for STT hotword biasing."""
+    seen: set[str] = set()
+    names: list[str] = []
+    for person in _all_contacts()[:limit]:
+        for name in _display_names(person):
+            if name and name not in seen:
+                seen.add(name)
+                names.append(name)
+    return names
