@@ -1,0 +1,106 @@
+[
+  {
+    "id": "anthropic",
+    "name": "Anthropic",
+    "description": "Claude AI — required",
+    "icon": "ti-robot",
+    "color": "purple",
+    "auth_type": "api_key",
+    "required": true,
+    "fields": [
+      { "key": "ANTHROPIC_API_KEY", "label": "API key", "required": true, "secret": true },
+      { "key": "DAILY_BUDGET_USD", "label": "Daily budget", "required": false, "secret": false, "placeholder": "$5.00" }
+    ],
+    "docs_url": "https://console.anthropic.com/settings/keys"
+  },
+  {
+    "id": "cartesia",
+    "name": "Cartesia",
+    "description": "Voice synthesis",
+    "icon": "ti-volume",
+    "color": "teal",
+    "auth_type": "api_key",
+    "required": false,
+    "fields": [
+      { "key": "CARTESIA_API_KEY", "label": "API key", "required": true, "secret": true }
+    ],
+    "docs_url": "https://play.cartesia.ai/keys"
+  },
+  {
+    "id": "google",
+    "name": "Google Workspace",
+    "description": "Gmail · Calendar · Sheets",
+    "icon": "ti-brand-google",
+    "color": "blue",
+    "auth_type": "oauth",
+    "required": false,
+    "oauth_action": "/api/hub/google/auth",
+    "fields": []
+  },
+  {
+    "id": "brave",
+    "name": "Brave Search",
+    "description": "Web search",
+    "icon": "ti-search",
+    "color": "amber",
+    "auth_type": "api_key",
+    "required": false,
+    "fields": [
+      { "key": "BRAVE_API_KEY", "label": "API key", "required": true, "secret": true }
+    ],
+    "docs_url": "https://brave.com/search/api/"
+  },
+  {
+    "id": "slack",
+    "name": "Slack",
+    "description": "Messages and channels",
+    "icon": "ti-brand-slack",
+    "color": "coral",
+    "auth_type": "api_key",
+    "required": false,
+    "fields": [
+      { "key": "SLACK_BOT_TOKEN", "label": "Bot token", "required": true, "secret": true, "placeholder": "xoxb-..." }
+    ],
+    "docs_url": "https://api.slack.com/apps"
+  },
+  {
+    "id": "github",
+    "name": "GitHub",
+    "description": "Repos and issues",
+    "icon": "ti-brand-github",
+    "color": "gray",
+    "auth_type": "api_key",
+    "required": false,
+    "fields": [
+      { "key": "GITHUB_TOKEN", "label": "Personal access token", "required": true, "secret": true, "placeholder": "ghp_..." }
+    ],
+    "docs_url": "https://github.com/settings/tokens"
+  },
+  {
+    "id": "home_assistant",
+    "name": "Home Assistant",
+    "description": "Smart home control",
+    "icon": "ti-home-cog",
+    "color": "gray",
+    "auth_type": "api_key",
+    "required": false,
+    "fields": [
+      { "key": "HA_URL", "label": "Instance URL", "required": true, "secret": false, "placeholder": "http://homeassistant.local:8123" },
+      { "key": "HA_TOKEN", "label": "Long-lived token", "required": true, "secret": true }
+    ],
+    "docs_url": "https://www.home-assistant.io/docs/authentication/"
+  },
+  {
+    "id": "notion",
+    "name": "Notion",
+    "description": "Notes and databases",
+    "icon": "ti-brand-notion",
+    "color": "pink",
+    "auth_type": "api_key",
+    "required": false,
+    "fields": [
+      { "key": "NOTION_TOKEN", "label": "Integration token", "required": true, "secret": true, "placeholder": "secret_..." }
+    ],
+    "docs_url": "https://www.notion.so/my-integrations"
+  }
+]

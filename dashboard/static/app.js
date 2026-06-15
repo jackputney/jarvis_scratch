@@ -61,7 +61,9 @@ function showView(name) {
   $$(".nav-item").forEach((b) => b.classList.toggle("active", b.dataset.view === name));
   $$(".view").forEach((v) => v.classList.toggle("active", v.dataset.view === name));
   if (name === "tools" && !_toolsLoaded) loadTools();
+  document.dispatchEvent(new CustomEvent("jarvis:view", { detail: name }));
 }
+window.jarvisShowView = showView;
 $$(".nav-item").forEach((b) => (b.onclick = () => showView(b.dataset.view)));
 
 // ---- State render -----------------------------------------------------

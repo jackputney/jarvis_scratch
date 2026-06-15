@@ -27,6 +27,8 @@ def test_index_serves(client):
     r = client.get("/")
     assert r.status_code == 200
     assert b"Jarvis" in r.data
+    assert b"Hub" in r.data
+    assert b"hub.js" in r.data
 
 
 @pytest.mark.parametrize("url", ["/api/state", "/api/config", "/api/variables", "/api/notes"])

@@ -345,3 +345,66 @@ ul.notes li .title:hover { color: var(--accent-2); }
   .grid { grid-template-columns: 1fr; }
   .topbar-meta .chip { display: none; }
 }
+
+/* ---------------- Jarvis Hub ---------------- */
+.hub-header { padding: 8px 0 0; max-width: 1180px; margin: 0 auto 8px; }
+.hub-header h1 { margin: 0 0 6px; font-size: 24px; }
+.sub { color: var(--muted); font-size: 13px; margin: 0; }
+.hub-tabs { display: flex; gap: 8px; margin-bottom: 18px; flex-wrap: wrap; }
+.hub-tab {
+  background: var(--panel); color: var(--muted); border: 1px solid var(--stroke);
+  border-radius: 999px; padding: 8px 16px; font-size: 13px; font-weight: 600;
+}
+.hub-tab.active { background: linear-gradient(180deg, var(--accent-2), var(--accent)); color: #04121b; border-color: transparent; }
+.hub-panels { max-width: 1180px; margin: 0 auto; }
+.hub-panel { display: none; }
+.hub-panel.active { display: block; }
+.hub-card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
+.hub-int-card {
+  text-align: left; cursor: pointer; background: var(--panel); border: 1px solid var(--stroke);
+  border-radius: 14px; padding: 16px; color: var(--text); display: flex; flex-direction: column; gap: 8px;
+}
+.hub-int-card:hover { border-color: var(--stroke-strong); transform: translateY(-2px); filter: none; }
+.hub-int-top { display: flex; justify-content: space-between; align-items: center; font-size: 22px; }
+.hub-int-name { font-weight: 650; font-size: 15px; }
+.hub-int-desc { color: var(--muted); font-size: 12px; flex: 1; }
+.hub-int-label { font-size: 12px; color: var(--accent); }
+.status-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.status-dot.on { background: var(--good); box-shadow: 0 0 8px rgba(46,230,166,0.6); }
+.status-dot.off { background: var(--muted); }
+.hub-conn { margin-bottom: 16px; }
+.hub-conn.highlight { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.hub-conn-head { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; }
+.hub-conn-head i { font-size: 24px; color: var(--accent); }
+.hub-conn-head h3 { margin: 0; font-size: 16px; }
+.conn-badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; }
+.conn-badge.on { background: rgba(46,230,166,0.15); color: var(--good); }
+.conn-badge.off { background: rgba(124,138,154,0.15); color: var(--muted); }
+.conn-form { display: flex; flex-direction: column; gap: 10px; margin: 12px 0; }
+.field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.field .req { color: var(--danger); }
+.conn-actions { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.docs-link { color: var(--accent); font-size: 12px; text-decoration: none; }
+.oauth-msg { font-size: 12px; color: var(--muted); margin-top: 8px; }
+.hidden { display: none !important; }
+.plugin-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.plugin-info { display: flex; flex-direction: column; gap: 2px; }
+.hub-generate { margin-top: 18px; }
+.hub-generate textarea { width: 100%; min-height: 80px; margin: 10px 0; }
+.hub-preview { margin-top: 14px; padding: 14px; background: var(--panel-2); border-radius: 10px; border: 1px solid var(--stroke); }
+.hub-preview pre { font-size: 12px; overflow: auto; max-height: 240px; }
+.preview-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; }
+.hub-health-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; margin-bottom: 16px; }
+.hub-health-grid h3 { margin: 0 0 10px; font-size: 13px; color: var(--accent); text-transform: uppercase; letter-spacing: .4px; }
+.health-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.health-list li { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.health-label { margin-left: auto; color: var(--muted); font-size: 12px; }
+.hub-preflight { margin-top: 12px; padding: 12px; background: var(--panel-2); border-radius: 8px; font-size: 12px; white-space: pre-wrap; }
+.color-purple { border-top: 3px solid #a855f7; }
+.color-teal { border-top: 3px solid #14b8a6; }
+.color-blue { border-top: 3px solid #3b82f6; }
+.color-amber { border-top: 3px solid #f59e0b; }
+.color-coral { border-top: 3px solid #fb7185; }
+.color-pink { border-top: 3px solid #ec4899; }
+.color-gray { border-top: 3px solid var(--muted); }
+@media (max-width: 880px) { .hub-health-grid { grid-template-columns: 1fr; } }

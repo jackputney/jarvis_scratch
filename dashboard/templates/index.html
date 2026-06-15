@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Jarvis Control</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css" />
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
 </head>
 <body>
@@ -19,6 +20,7 @@
       <nav class="nav">
         <button class="nav-item active" data-view="overview"><span class="nav-ico">📊</span><span>Overview</span></button>
         <button class="nav-item" data-view="tools"><span class="nav-ico">🛠️</span><span>Tools</span></button>
+        <button class="nav-item" data-view="hub"><i class="ti ti-plug-connected nav-ico"></i><span>Hub</span></button>
         <button class="nav-item" data-view="memory"><span class="nav-ico">🧠</span><span>Memory</span></button>
         <button class="nav-item" data-view="settings"><span class="nav-ico">⚙️</span><span>Settings</span></button>
       </nav>
@@ -140,6 +142,61 @@
             </section>
           </div>
         </section>
+
+        <!-- ============ HUB ============ -->
+        <section class="view" data-view="hub" id="hub-view">
+          <div class="hub-header">
+            <div>
+              <h1>Jarvis Hub</h1>
+              <p class="sub">Connect services, manage plugins, and monitor system health — all from one place.</p>
+            </div>
+          </div>
+          <div class="hub-tabs" id="hub-tabs">
+            <button class="hub-tab active" data-hub-tab="setup">Setup</button>
+            <button class="hub-tab" data-hub-tab="connections">Connections</button>
+            <button class="hub-tab" data-hub-tab="plugins">Plugins</button>
+            <button class="hub-tab" data-hub-tab="health">Health</button>
+          </div>
+          <div class="hub-panels">
+            <div class="hub-panel active" data-hub-panel="setup">
+              <div class="hub-card-grid" id="hub-setup-grid"></div>
+            </div>
+            <div class="hub-panel" data-hub-panel="connections">
+              <div id="hub-connections-list"></div>
+            </div>
+            <div class="hub-panel" data-hub-panel="plugins">
+              <div id="hub-plugins-list"></div>
+              <div class="hub-generate card">
+                <h3>Describe an automation</h3>
+                <textarea id="hub-plugin-desc" placeholder="Monitor inbox for urgent emails and notify me by voice…"></textarea>
+                <button id="hub-plugin-generate" class="primary">Generate</button>
+                <div id="hub-plugin-preview" class="hub-preview hidden"></div>
+              </div>
+            </div>
+            <div class="hub-panel" data-hub-panel="health">
+              <div class="hub-health-grid">
+                <div class="card" id="hub-health-services">
+                  <h3>Services</h3>
+                  <ul class="health-list" id="hub-service-dots"></ul>
+                </div>
+                <div class="card" id="hub-health-orchestrator">
+                  <h3>Orchestrator</h3>
+                  <div id="hub-orchestrator-stats"></div>
+                </div>
+                <div class="card" id="hub-health-plugins">
+                  <h3>Plugins</h3>
+                  <div id="hub-plugin-stats"></div>
+                </div>
+                <div class="card" id="hub-health-spend">
+                  <h3>Spend</h3>
+                  <div id="hub-spend-stats"></div>
+                </div>
+              </div>
+              <button id="hub-preflight" class="primary">Run preflight</button>
+              <pre id="hub-preflight-result" class="hub-preflight hidden"></pre>
+            </div>
+          </div>
+        </section>
       </div>
     </div>
   </div>
@@ -195,5 +252,6 @@
   </div>
 
   <script src="{{ url_for('static', filename='app.js') }}"></script>
+  <script src="{{ url_for('static', filename='hub.js') }}"></script>
 </body>
 </html>

@@ -24,6 +24,11 @@ Endpoints:
   POST /api/message       → {text} → enqueue on the orchestrator, return reply (text)
   POST /api/interrupt     → cancel the running turn and clear the queue
   POST /api/confirm/respond → {id, allow} → resolve pending tool confirm
+  GET  /api/hub/integrations → integration catalogue with live status
+  GET  /api/hub/status       → health snapshot (services, orchestrator, plugins, spend)
+  POST /api/hub/keys         → save integration credentials
+  POST /api/hub/google/auth  → start Google OAuth (non-blocking)
+  GET  /api/plugins          → list plugin manifests
 """
 
 from __future__ import annotations
@@ -38,6 +43,7 @@ from flask import Flask, Response, jsonify, request
 import costs
 import events
 from config import Config
+from dashboard.hub_routes import hub_bp, list_plugin_manifests
 from memory import knowledge, variables
 
 logger = logging.getLogger("jarvis.dashboard")
@@ -92,6 +98,7 @@ def create_app() -> Flask:
     app = Flask(__name__, static_folder="static", template_folder="templates")
     app.config["JSON_SORT_KEYS"] = False
     _ensure_bus_subscription()
+    app.register_blueprint(hub_bp)
 
     # -- Page ---------------------------------------------------------------
     @app.route("/")
@@ -302,6 +309,10 @@ def create_app() -> Flask:
         if not resolved:
             return jsonify({"ok": False, "error": "no matching pending confirm"}), 404
         return jsonify({"ok": True, "allow": allow})
+
+    @app.route("/api/plugins")
+    def api_plugins_list():  # noqa: ANN202
+        return jsonify({"plugins": list_plugin_manifests()})
 
     return app
 
