@@ -12,6 +12,13 @@ class hierarchy — just explicit, readable mappings.
 from __future__ import annotations
 
 from memory.knowledge import read_note, write_note
+from tools.device_control import (
+    lock_screen,
+    set_brightness,
+    set_do_not_disturb,
+    set_mute,
+    set_volume,
+)
 from tools.download import download_file
 from memory.semantic import remember as remember_fact, search as search_memory_index
 from memory.variables import get_variable, set_variable
@@ -44,6 +51,55 @@ TOOL_DEFINITIONS: list[dict] = [
             },
             "required": ["app_name"],
         },
+    },
+    {
+        "name": "set_volume",
+        "description": "Set the system master volume to a percentage (0–100).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "level": {"type": "integer", "description": "Volume percent, 0–100."},
+            },
+            "required": ["level"],
+        },
+    },
+    {
+        "name": "set_mute",
+        "description": "Mute or unmute the system audio.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "muted": {"type": "boolean", "description": "True to mute, false to unmute."},
+            },
+            "required": ["muted"],
+        },
+    },
+    {
+        "name": "set_brightness",
+        "description": "Set the main display brightness to a percentage (0–100). Laptop displays only.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "level": {"type": "integer", "description": "Brightness percent, 0–100."},
+            },
+            "required": ["level"],
+        },
+    },
+    {
+        "name": "set_do_not_disturb",
+        "description": "Turn Do Not Disturb on or off (suppresses notifications on Windows).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "enabled": {"type": "boolean", "description": "True for DND on, false for off."},
+            },
+            "required": ["enabled"],
+        },
+    },
+    {
+        "name": "lock_screen",
+        "description": "Lock the computer / workstation immediately.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
     },
     {
         "name": "download_file",
@@ -416,6 +472,11 @@ TOOL_DISPATCH: dict[str, callable] = {
     "open_app": lambda **kw: open_app(kw["app_name"]),
     "web_search": lambda **kw: web_search(kw["query"]),
     "download_file": lambda **kw: download_file(kw["url"], kw.get("filename")),
+    "set_volume": lambda **kw: set_volume(kw["level"]),
+    "set_mute": lambda **kw: set_mute(bool(kw["muted"])),
+    "set_brightness": lambda **kw: set_brightness(kw["level"]),
+    "set_do_not_disturb": lambda **kw: set_do_not_disturb(bool(kw["enabled"])),
+    "lock_screen": lambda **kw: lock_screen(),
     "set_variable": lambda **kw: (set_variable(kw["key"], kw["value"]) or f"Saved {kw['key']}={kw['value']}"),
     "get_variable": lambda **kw: (get_variable(kw["key"]) or f"No value stored for '{kw['key']}'."),
     "write_note": lambda **kw: write_note(kw["title"], kw["content"]),
@@ -477,6 +538,11 @@ READ_ONLY_TOOLS = frozenset({
 # Low-risk mutating tools — auto-allow in voice mode (confirm gate does not apply).
 AUTO_ALLOW_TOOLS = frozenset({
     "open_app",
+    "set_volume",
+    "set_mute",
+    "set_brightness",
+    "set_do_not_disturb",
+    "lock_screen",
     "set_variable",
     "write_note",
     "remember",
