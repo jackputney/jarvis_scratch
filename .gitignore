@@ -1,6 +1,8 @@
 # Environment and secrets
 .env
 config.json
+credentials.json
+*.bak
 
 # Memory data (personal, never committed)
 memory/knowledge/
