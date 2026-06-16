@@ -14,10 +14,10 @@ from pipeline import WAKE_WORD_MODELS, resolve_wake_model, prepare_wake_word_mod
 @pytest.mark.parametrize(
     ("config_value", "expected"),
     [
-        ("hey_jarvis", "hey_jarvis_v0.1"),
-        ("hey jarvis", "hey_jarvis_v0.1"),
-        ("alexa", "alexa_v0.1"),
-        ("hey_jarvis_v0.1", "hey_jarvis_v0.1"),
+        ("hey_jarvis", "hey_jarvis"),
+        ("hey jarvis", "hey_jarvis"),
+        ("alexa", "alexa"),
+        ("something_unmapped", "hey_jarvis"),  # unknown → safe default
     ],
 )
 def test_resolve_wake_model_maps_config_to_openwakeword_id(config_value, expected):
@@ -32,7 +32,7 @@ def test_prepare_wake_word_model_resolves_before_ensure(monkeypatch):
 
     monkeypatch.setattr("pipeline._ensure_wake_model", _capture)
     prepare_wake_word_model("hey_jarvis")
-    assert seen == ["hey_jarvis_v0.1"]
+    assert seen == ["hey_jarvis"]
 
 
 def test_get_recent_notes_caps_each_note(temp_env):
