@@ -467,7 +467,17 @@ def _transcribe(audio_bytes: bytes, cfg: Config) -> str:
     audio_np = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
     model_name = cfg.effective_stt_model()
 
-    if cfg.stt_backend == "faster":
+    backend = cfg.stt_backend
+    if backend != "faster":
+        # mlx-whisper is Apple-Silicon only; fall back to faster-whisper elsewhere
+        # (e.g. Windows/Linux) so transcription works regardless of config.
+        try:
+            import mlx_whisper  # type: ignore[import]  # noqa: F401
+        except ImportError:
+            logger.warning("⚠️  mlx-whisper unavailable — using faster-whisper for STT.")
+            backend = "faster"
+
+    if backend == "faster":
         global _fw_model, _fw_model_name
         from faster_whisper import WhisperModel
 
