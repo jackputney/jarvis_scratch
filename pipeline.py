@@ -677,10 +677,12 @@ def _call_claude(
     on_sentence: Callable[[str], None] | None = None,
 ) -> tuple[str, str, float, bool]:
     from llm import get_llm_client
+    from llm.router import resolve_models
 
-    client = get_llm_client(cfg, timeout=CLAUDE_HTTP_TIMEOUT_SEC)
-    model = cfg.claude_model_fast
-    logger.info("🧠 Starting on %s (escalate tool → %s)", model, cfg.claude_model_smart)
+    provider, fast_model, smart_model = resolve_models(text, cfg)
+    client = get_llm_client(cfg, timeout=CLAUDE_HTTP_TIMEOUT_SEC, provider=provider)
+    model = fast_model
+    logger.info("🧠 Routed to %s — starting on %s (escalate → %s)", provider, model, smart_model)
 
     messages: list[dict[str, Any]] = list(history or [])
     messages.append({"role": "user", "content": text})
@@ -744,9 +746,9 @@ def _call_claude(
             elif block.type == "tool_use":
                 tool_uses.append({"id": block.id, "name": block.name, "input": block.input})
 
-        if model == cfg.claude_model_fast and any(tu["name"] == "escalate" for tu in tool_uses):
-            logger.info("⬆️  Escalating to %s for this turn.", cfg.claude_model_smart)
-            model = cfg.claude_model_smart
+        if model == fast_model and any(tu["name"] == "escalate" for tu in tool_uses):
+            logger.info("⬆️  Escalating to %s for this turn.", smart_model)
+            model = smart_model
 
         if not tool_uses:
             return reply_text.strip(), model, total_cost, stream_spoken
