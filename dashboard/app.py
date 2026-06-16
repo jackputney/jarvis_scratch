@@ -40,8 +40,9 @@ import logging
 import queue
 import threading
 import time
+from pathlib import Path
 
-from flask import Flask, Response, jsonify, request
+from flask import Flask, Response, jsonify, make_response, request
 
 import costs
 import events
@@ -54,6 +55,16 @@ logger = logging.getLogger("jarvis.dashboard")
 HOST = "127.0.0.1"
 PORT = 7777
 _START_TIME = time.time()
+_STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+
+def _static_version() -> str:
+    """Cache-bust static assets when JS/CSS change."""
+    try:
+        mtimes = [_STATIC_DIR.joinpath(name).stat().st_mtime for name in ("app.js", "style.css", "hub.js")]
+        return str(int(max(mtimes)))
+    except OSError:
+        return "1"
 
 # -- Server-Sent Events fan-out ---------------------------------------------
 # The orchestrator emits job/state events on the shared bus; we mirror them to
@@ -126,7 +137,10 @@ def create_app() -> Flask:
     @app.route("/")
     def index():  # noqa: ANN202
         from flask import render_template
-        return render_template("index.html")
+
+        resp = make_response(render_template("index.html", static_v=_static_version()))
+        resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+        return resp
 
     # -- State (polled every 2s) -------------------------------------------
     @app.route("/api/state")

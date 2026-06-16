@@ -139,7 +139,10 @@ async function loadMetrics() {
     try {
       const contactsData = await getJSON("/api/contacts");
       const count = (contactsData.contacts || []).length;
-      $("metric-contacts").textContent = contactsData.error ? "—" : String(count);
+      const metricEl = $("metric-contacts");
+      if (metricEl) {
+        metricEl.textContent = contactsData.error ? "—" : String(count);
+      }
     } catch {
       /* transient */
     }
@@ -248,18 +251,23 @@ async function loadContactsView() {
     list.innerHTML = "";
     const contacts = data.contacts || [];
     if (data.error && !contacts.length) {
-      list.innerHTML = `<p class="contacts-empty">No contacts found. Connect Google in Hub → Connections.</p>`;
+      list.innerHTML =
+        `<p class="contacts-empty">Could not load contacts.</p>` +
+        `<p class="contacts-empty sub">${esc(data.error)}</p>` +
+        `<p class="contacts-empty"><a href="#" onclick="switchView('hub');return false;">Connect Google in Hub → Connections</a></p>`;
       return;
     }
     if (!contacts.length) {
-      list.innerHTML = `<p class="contacts-empty">No contacts found. Connect Google in Hub → Connections.</p>`;
+      list.innerHTML =
+        `<p class="contacts-empty">No contacts found.</p>` +
+        `<p class="contacts-empty sub"><a href="#" onclick="switchView('hub');return false;">Connect Google in Hub → Connections</a></p>`;
       return;
     }
     contacts.forEach((c) => list.appendChild(renderContactCard(c)));
     const search = $("contacts-search");
     if (search && search.value) filterContacts(search.value);
-  } catch {
-    list.innerHTML = `<p class="contacts-empty">Could not load contacts.</p>`;
+  } catch (err) {
+    list.innerHTML = `<p class="contacts-empty">Could not load contacts. Try a hard refresh (⌘⇧R).</p>`;
   }
 }
 

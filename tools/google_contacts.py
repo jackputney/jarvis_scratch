@@ -31,7 +31,7 @@ def _all_contacts() -> list[dict]:
         resp = service.people().connections().list(
             resourceName="people/me",
             pageSize=PAGE_SIZE,
-            personFields="names,emailAddresses,phoneNumbers",
+            personFields="names,emailAddresses,phoneNumbers,organizations,photos",
             pageToken=page_token,
         ).execute()
         people.extend(resp.get("connections", []))
@@ -135,16 +135,8 @@ def _get_initials(name: str) -> str:
 
 def list_contacts_full(count: int = 200) -> list[dict]:
     """Return structured contact data for the dashboard UI."""
-    service = _service()
-    results = service.people().connections().list(
-        resourceName="people/me",
-        pageSize=min(count, 200),
-        personFields="names,emailAddresses,phoneNumbers,organizations,photos",
-        sortOrder="LAST_NAME_ASCENDING",
-    ).execute()
-
     contacts: list[dict] = []
-    for person in results.get("connections", []):
+    for person in _all_contacts()[: max(1, min(int(count), 200))]:
         names = person.get("names", [{}])
         emails = person.get("emailAddresses", [])
         phones = person.get("phoneNumbers", [])

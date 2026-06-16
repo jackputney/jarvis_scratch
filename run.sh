@@ -32,7 +32,7 @@ source .venv/bin/activate
 
 # --- Dependencies ---------------------------------------------------------
 # Fast check: if the key imports succeed we skip the (slow) pip install.
-if ! python -c "import anthropic, flask, PyQt6, pyaudio, mlx_whisper, openwakeword" >/dev/null 2>&1; then
+if ! python -c "import anthropic, flask, PyQt6, pyaudio, mlx_whisper, openwakeword, dotenv" >/dev/null 2>&1; then
   echo "📦 Installing Python dependencies (first run / new deps)…"
   python -m pip install --upgrade pip >/dev/null
   python -m pip install -r requirements.txt

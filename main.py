@@ -224,6 +224,7 @@ def _run_with_ui(cfg: Config) -> None:
         sys.exit(app.exec())
     except SystemExit:
         stop_event.set()
+        face.shutdown()
         if _scheduler is not None:
             _scheduler.shutdown()
 

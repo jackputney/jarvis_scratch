@@ -89,6 +89,8 @@ body::before {
   border-right: 1px solid var(--stroke);
   background: linear-gradient(180deg, rgba(18, 21, 28, 0.96), rgba(11, 13, 17, 0.92));
   backdrop-filter: blur(16px);
+  min-height: 0;
+  overflow: hidden;
 }
 
 .sidebar-brand {
@@ -158,6 +160,9 @@ body::before {
   flex-direction: column;
   gap: 4px;
   flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
 }
 
 .nav-item {
@@ -814,6 +819,8 @@ ul.notes li .title:hover { color: var(--accent-bright); }
 .contacts-search { width: 100%; margin-bottom: 16px; }
 .contacts-list { max-height: calc(100vh - var(--dock-h) - 180px); overflow-y: auto; }
 .contacts-empty { color: var(--muted); padding: 24px 8px; text-align: center; }
+.contacts-empty.sub { padding-top: 0; font-size: 12px; }
+.contacts-empty a { color: var(--accent-bright); }
 
 .contact-card {
   display: grid;

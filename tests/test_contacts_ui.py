@@ -1,6 +1,6 @@
 """Dashboard contacts API and google_contacts helpers."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -37,28 +37,33 @@ def test_api_contacts_handles_error(client):
 
 
 def test_list_contacts_full_skips_nameless():
-    mock_service = MagicMock()
-    mock_service.people().connections().list().execute.return_value = {
-        "connections": [
-            {
-                "names": [{"displayName": "Jane Doe", "givenName": "Jane", "familyName": "Doe"}],
-                "emailAddresses": [{"value": "jane@example.com"}],
-                "phoneNumbers": [],
-                "organizations": [],
-                "photos": [],
-            },
-            {
-                "names": [],
-                "emailAddresses": [{"value": "ghost@example.com"}],
-            },
-        ],
-    }
-    with patch("tools.google_contacts._service", return_value=mock_service):
+    people = [
+        {
+            "names": [{"displayName": "Jane Doe", "givenName": "Jane", "familyName": "Doe"}],
+            "emailAddresses": [{"value": "jane@example.com"}],
+            "phoneNumbers": [],
+            "organizations": [],
+            "photos": [],
+        },
+        {
+            "names": [],
+            "emailAddresses": [{"value": "ghost@example.com"}],
+        },
+    ]
+    with patch("tools.google_contacts._all_contacts", return_value=people):
         from tools.google_contacts import list_contacts_full
 
         contacts = list_contacts_full(count=10)
     assert len(contacts) == 1
     assert contacts[0]["name"] == "Jane Doe"
+
+
+def test_index_includes_contacts_nav(client):
+    r = client.get("/")
+    assert r.status_code == 200
+    assert b"data-view=\"contacts\"" in r.data
+    assert b"Contacts</span>" in r.data
+    assert b"/api/contacts" not in r.data  # API is JS-fetched, not inline
 
 
 def test_get_initials():

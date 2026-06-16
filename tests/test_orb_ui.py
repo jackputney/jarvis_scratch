@@ -70,3 +70,23 @@ def test_point_in_core_miss():
 
 def test_core_radius_is_click_target_size():
     assert CORE_RADIUS == 26.0
+
+
+def test_face_window_does_not_use_tool_flag():
+    """Tool windows on macOS auto-hide when the app loses focus."""
+    import sys
+
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtWidgets import QApplication
+
+    from ui.face import FaceWidget
+
+    app = QApplication.instance() or QApplication(sys.argv)
+    widget = FaceWidget()
+    try:
+        flags = widget.windowFlags()
+        assert not (int(flags) & int(Qt.WindowType.Tool))
+        assert int(flags) & int(Qt.WindowType.WindowStaysOnTopHint)
+    finally:
+        widget.shutdown()
+        app.processEvents()

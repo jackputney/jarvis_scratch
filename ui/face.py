@@ -8,6 +8,7 @@ Click the orb to toggle mute; drag the panel to reposition; Escape cancels.
 
 from __future__ import annotations
 
+import logging
 import math
 import platform
 from collections.abc import Callable
@@ -36,6 +37,8 @@ from PyQt6.QtGui import (
     QShortcut,
 )
 from PyQt6.QtWidgets import QApplication, QWidget
+
+logger = logging.getLogger("jarvis.ui")
 
 # Landscape HUD — frosted panel with orb left, state label right
 HUD_W = 200
@@ -524,12 +527,17 @@ class OrbWidget(QWidget):
 class FaceWidget(QWidget):
     """Transparent floating HUD hosting the orb panel."""
 
+    _VISIBILITY_POLL_MS = 2000
+
     def __init__(self) -> None:
         super().__init__()
+        # Do NOT use Qt.Tool — on macOS tool windows auto-hide when Jarvis loses
+        # focus (switching apps, fullscreen, Spaces), which looks like the orb
+        # randomly vanished.
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
-            | Qt.WindowType.Tool,
+            | Qt.WindowType.WindowDoesNotAcceptFocus,
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
@@ -538,17 +546,55 @@ class FaceWidget(QWidget):
 
         self._drag_pos: QPointF | None = None
         self._interrupt_cb: Callable[[], None] | None = None
+        self._shutting_down = False
         self._orb = OrbWidget(self)
         self._orb.setGeometry(0, 0, HUD_W, HUD_H)
 
         QShortcut(QKeySequence(Qt.Key.Key_Escape), self, self._on_stop)
 
         _try_macos_vibrancy(self)
+        self._move_to_default_corner()
 
+        self._visibility_timer = QTimer(self)
+        self._visibility_timer.timeout.connect(self._ensure_visible)
+        self._visibility_timer.start(self._VISIBILITY_POLL_MS)
+
+    def _move_to_default_corner(self) -> None:
         screen = QApplication.primaryScreen()
         if screen:
             geom = screen.availableGeometry()
             self.move(geom.width() - 220, geom.height() - 140)
+
+    def _clamp_to_screen(self) -> None:
+        """Keep the HUD on-screen after display layout changes."""
+        if self.isVisible():
+            center = self.frameGeometry().center()
+            screen = QApplication.screenAt(center) or QApplication.primaryScreen()
+        else:
+            screen = QApplication.primaryScreen()
+        if screen is None:
+            return
+        geom = screen.availableGeometry()
+        w, h = self.width(), self.height()
+        x = max(geom.left(), min(self.x(), geom.right() - w))
+        y = max(geom.top(), min(self.y(), geom.bottom() - h))
+        if x != self.x() or y != self.y():
+            self.move(x, y)
+
+    def _ensure_visible(self) -> None:
+        if self._shutting_down:
+            return
+        if not self.isVisible() or self.isMinimized():
+            logger.debug("Orb HUD was hidden — restoring visibility.")
+            self.show_overlay()
+        else:
+            self._clamp_to_screen()
+
+    def shutdown(self) -> None:
+        """Allow the window to close during app exit."""
+        self._shutting_down = True
+        self._visibility_timer.stop()
+        self.close()
 
     @property
     def muted(self) -> bool:
@@ -562,8 +608,16 @@ class FaceWidget(QWidget):
             self._interrupt_cb()
 
     def show_overlay(self) -> None:
-        self.show()
+        self.showNormal()
         self.raise_()
+        self._clamp_to_screen()
+
+    def closeEvent(self, event) -> None:  # noqa: ANN001
+        if self._shutting_down:
+            event.accept()
+            return
+        event.ignore()
+        self.show_overlay()
 
     def start_drag(self, event) -> None:  # noqa: ANN001
         if event.button() == Qt.MouseButton.LeftButton:
