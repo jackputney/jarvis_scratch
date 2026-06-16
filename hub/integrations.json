@@ -14,6 +14,32 @@
     "docs_url": "https://console.anthropic.com/settings/keys"
   },
   {
+    "id": "openai",
+    "name": "OpenAI",
+    "description": "GPT models — alternate LLM backend (set llm_provider=openai)",
+    "icon": "ti-brain",
+    "color": "green",
+    "auth_type": "api_key",
+    "required": false,
+    "fields": [
+      { "key": "OPENAI_API_KEY", "label": "API key", "required": true, "secret": true, "placeholder": "sk-..." }
+    ],
+    "docs_url": "https://platform.openai.com/api-keys"
+  },
+  {
+    "id": "gemini",
+    "name": "Google Gemini",
+    "description": "Gemini models — alternate LLM backend (set llm_provider=gemini)",
+    "icon": "ti-sparkles",
+    "color": "blue",
+    "auth_type": "api_key",
+    "required": false,
+    "fields": [
+      { "key": "GEMINI_API_KEY", "label": "API key", "required": true, "secret": true, "placeholder": "AIza..." }
+    ],
+    "docs_url": "https://aistudio.google.com/app/apikey"
+  },
+  {
     "id": "cartesia",
     "name": "Cartesia",
     "description": "Voice synthesis",

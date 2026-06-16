@@ -30,6 +30,7 @@ def _load_dotenv_if_present() -> None:
 
 
 _PERSISTED_FIELDS = (
+    "llm_provider",
     "claude_model_fast",
     "claude_model_smart",
     "routing_word_threshold",
@@ -63,6 +64,7 @@ _PERSISTED_FIELDS = (
 
 @dataclass
 class Config:
+    llm_provider: str = "anthropic"  # anthropic | openai | gemini
     claude_model_fast: str = "claude-haiku-4-5"
     claude_model_smart: str = "claude-sonnet-4-6"
     routing_word_threshold: int = 20
@@ -93,6 +95,8 @@ class Config:
     vad_min_capture_ms: int = 2500
 
     anthropic_api_key: str = field(default="", repr=False)
+    openai_api_key: str = field(default="", repr=False)
+    gemini_api_key: str = field(default="", repr=False)
     cartesia_api_key: str = field(default="", repr=False)
     google_client_secret: str = field(default="", repr=False)
     brave_api_key: str = field(default="", repr=False)
@@ -107,6 +111,7 @@ class Config:
 
         stt_model = data.get("stt_model") or data.get("whisper_model", cls.stt_model)
         cfg = cls(
+            llm_provider=data.get("llm_provider", cls.llm_provider),
             claude_model_fast=data.get("claude_model_fast", cls.claude_model_fast),
             claude_model_smart=data.get("claude_model_smart", cls.claude_model_smart),
             routing_word_threshold=data.get("routing_word_threshold", cls.routing_word_threshold),
@@ -146,6 +151,8 @@ class Config:
         )
 
         cfg.anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+        cfg.openai_api_key = os.environ.get("OPENAI_API_KEY", "")
+        cfg.gemini_api_key = os.environ.get("GEMINI_API_KEY", "")
         cfg.cartesia_api_key = os.environ.get("CARTESIA_API_KEY", "")
         cfg.google_client_secret = os.environ.get("GOOGLE_CLIENT_SECRET", "")
         cfg.brave_api_key = os.environ.get("BRAVE_API_KEY", "")
