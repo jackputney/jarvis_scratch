@@ -98,14 +98,35 @@ def test_get_unread_emails():
             "headers": [
                 {"name": "From", "value": "Alice <alice@example.com>"},
                 {"name": "Subject", "value": "Hi"},
+                {"name": "Date", "value": "Mon"},
             ]
         },
     }
-    with patch("tools.gmail.get_gmail_service", return_value=mock_service):
-        from tools.gmail import get_unread_emails
+    with patch("tools.google_gmail.get_gmail_service", return_value=mock_service):
+        from tools.google_gmail import get_unread_emails
         out = get_unread_emails(max_results=5)
     assert "Alice" in out or "alice@example.com" in out
     assert "Hi" in out
+
+
+def test_list_recent_emails():
+    mock_service = MagicMock()
+    mock_service.users().messages().list().execute.return_value = {"messages": [{"id": "m1"}]}
+    mock_service.users().messages().get().execute.return_value = {
+        "snippet": "Recent note",
+        "payload": {"headers": [{"name": "Subject", "value": "Update"}]},
+    }
+    with patch("tools.google_gmail.get_gmail_service", return_value=mock_service):
+        from tools.google_gmail import list_recent_emails
+        out = list_recent_emails(max_results=3)
+    assert "Update" in out
+
+
+def test_clean_snippet_strips_zero_width():
+    from tools.google_gmail import _clean_snippet
+
+    raw = "Hello\u200bworld &#39;s"
+    assert _clean_snippet(raw) == "Helloworld 's"
 
 
 def test_search_emails():
@@ -115,8 +136,8 @@ def test_search_emails():
         "snippet": "Invoice attached",
         "payload": {"headers": [{"name": "Subject", "value": "Invoice"}]},
     }
-    with patch("tools.gmail.get_gmail_service", return_value=mock_service):
-        from tools.gmail import search_emails
+    with patch("tools.google_gmail.get_gmail_service", return_value=mock_service):
+        from tools.google_gmail import search_emails
         out = search_emails("invoice")
     assert "Invoice" in out
 
@@ -124,10 +145,17 @@ def test_search_emails():
 def test_send_email():
     mock_service = MagicMock()
     mock_service.users().messages().send().execute.return_value = {"id": "sent123"}
-    with patch("tools.gmail.get_gmail_service", return_value=mock_service):
-        from tools.gmail import send_email
+    with patch("tools.google_gmail.get_gmail_service", return_value=mock_service):
+        from tools.google_gmail import send_email
         out = send_email("bob@example.com", "Test", "Body text")
     assert "sent" in out.lower() or "sent123" in out
+
+
+def test_escalate_tool_is_auto_allow():
+    from tools.registry import AUTO_ALLOW_TOOLS, TOOL_DISPATCH
+
+    assert "escalate" in AUTO_ALLOW_TOOLS
+    assert TOOL_DISPATCH["escalate"](reason="test") == "Escalated to the advanced model."
 
 
 # ---------------------------------------------------------------------------
@@ -173,6 +201,7 @@ def test_google_read_only_tools_skip_confirm():
         "get_calendar_events",
         "get_todays_schedule",
         "get_unread_emails",
+        "list_recent_emails",
         "search_emails",
         "read_sheet",
     ):

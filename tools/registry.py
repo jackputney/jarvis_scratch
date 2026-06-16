@@ -18,7 +18,7 @@ from tools.github import create_github_comment, get_github_repo_summary, search_
 from tools.google_calendar import get_calendar_events, get_todays_schedule
 from tools.google_contacts import list_contacts, search_contacts
 from tools.google_drive import read_drive_file, search_drive
-from tools.gmail import get_unread_emails, search_emails, send_email
+from tools.google_gmail import get_unread_emails, list_recent_emails, search_emails, send_email
 from tools.google_sheets import append_row, read_sheet, update_cell
 from tools.slack import read_slack_channel, send_slack_message
 from tools.system import open_app
@@ -120,6 +120,17 @@ TOOL_DEFINITIONS: list[dict] = [
         },
     },
     {
+        "name": "escalate",
+        "description": (
+            "Hand this turn off to the more capable model. Call this FIRST — before "
+            "answering or using other tools — when the request needs careful multi-step "
+            "reasoning, planning, analysis, coding, or nuanced writing that a fast model "
+            "might get wrong. Do NOT call it for simple lookups, chit-chat, or single "
+            "tool actions; answer those directly."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
         "name": "search_memory",
         "description": "Search the user's local semantic memory for relevant past notes and diary entries.",
         "input_schema": {
@@ -168,12 +179,30 @@ TOOL_DEFINITIONS: list[dict] = [
         },
     },
     {
+        "name": "list_recent_emails",
+        "description": "Summarise the most recent Gmail inbox messages (sender, subject, snippet).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "max_results": {
+                    "type": "integer",
+                    "description": "Maximum number of emails to return (default 5, max 20).",
+                },
+            },
+            "required": [],
+        },
+    },
+    {
         "name": "search_emails",
         "description": "Search Gmail using standard Gmail query syntax.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "query": {"type": "string", "description": "Gmail search query."},
+                "max_results": {
+                    "type": "integer",
+                    "description": "Maximum number of results (default 5, max 20).",
+                },
             },
             "required": ["query"],
         },
@@ -372,13 +401,17 @@ TOOL_DISPATCH: dict[str, callable] = {
     "write_note": lambda **kw: write_note(kw["title"], kw["content"]),
     "read_note": lambda **kw: (read_note(kw["title"]) or f"No note found for '{kw['title']}'."),
     "remember": lambda **kw: remember_fact(kw["fact"]),
+    "escalate": lambda **kw: "Escalated to the advanced model.",
     "search_memory": lambda **kw: _format_memory_hits(
         search_memory_index(kw["query"], top_k=int(kw.get("limit") or 5))
     ),
     "get_calendar_events": lambda **kw: get_calendar_events(kw.get("days", 7)),
     "get_todays_schedule": lambda **kw: get_todays_schedule(),
     "get_unread_emails": lambda **kw: get_unread_emails(kw.get("max", 5)),
-    "search_emails": lambda **kw: search_emails(kw["query"]),
+    "list_recent_emails": lambda **kw: list_recent_emails(kw.get("max_results", 5)),
+    "search_emails": lambda **kw: search_emails(
+        kw["query"], kw.get("max_results", 5),
+    ),
     "send_email": lambda **kw: send_email(kw["to"], kw["subject"], kw["body"]),
     "read_sheet": lambda **kw: read_sheet(kw["spreadsheet_id"], kw["range"]),
     "append_row": lambda **kw: append_row(kw["spreadsheet_id"], kw["sheet_name"], kw["values"]),
@@ -409,6 +442,7 @@ READ_ONLY_TOOLS = frozenset({
     "get_calendar_events",
     "get_todays_schedule",
     "get_unread_emails",
+    "list_recent_emails",
     "search_emails",
     "read_sheet",
     "search_contacts",
@@ -426,6 +460,7 @@ AUTO_ALLOW_TOOLS = frozenset({
     "set_variable",
     "write_note",
     "remember",
+    "escalate",
 })
 
 # High-risk mutating tools — dashboard confirm required when confirm_before_execute is on.

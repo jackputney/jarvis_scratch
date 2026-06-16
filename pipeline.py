@@ -88,7 +88,12 @@ STATIC_SYSTEM_INSTRUCTIONS = (
     "40 words for simple questions). Recent message history may appear before the latest "
     "user turn — use it for follow-ups. When the user shares durable personal facts "
     "(preferences, relationships, routines, goals), persist them with remember, "
-    "set_variable, or write_note so future turns stay personalised."
+    "set_variable, or write_note so future turns stay personalised.\n\n"
+    "## When to escalate\n"
+    "You start on the fast model. If a request needs careful multi-step reasoning, "
+    "planning, analysis, coding, or nuanced writing, call the escalate tool FIRST and "
+    "stop — the smart model takes over with full context. Handle simple lookups, "
+    "chit-chat, and single tool actions yourself without escalating."
 )
 
 WARN_80_MESSAGE = "Heads up, I'm at 80 percent of today's budget."
@@ -651,8 +656,8 @@ def _call_claude(
         api_key=cfg.anthropic_api_key,
         timeout=CLAUDE_HTTP_TIMEOUT_SEC,
     )
-    model = cfg.claude_model_fast if cfg.route_to_fast_model(text) else cfg.claude_model_smart
-    logger.info("🧠 Routing to %s", model)
+    model = cfg.claude_model_fast
+    logger.info("🧠 Starting on %s (escalate tool → %s)", model, cfg.claude_model_smart)
 
     messages: list[dict[str, Any]] = list(history or [])
     messages.append({"role": "user", "content": text})
@@ -715,6 +720,10 @@ def _call_claude(
                 reply_text += block.text
             elif block.type == "tool_use":
                 tool_uses.append({"id": block.id, "name": block.name, "input": block.input})
+
+        if model == cfg.claude_model_fast and any(tu["name"] == "escalate" for tu in tool_uses):
+            logger.info("⬆️  Escalating to %s for this turn.", cfg.claude_model_smart)
+            model = cfg.claude_model_smart
 
         if not tool_uses:
             return reply_text.strip(), model, total_cost, stream_spoken

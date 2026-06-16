@@ -55,3 +55,71 @@ def test_build_system_blocks_has_cache_control():
     assert len(blocks) == 2
     assert blocks[0]["cache_control"] == {"type": "ephemeral"}
     assert "Jarvis" in blocks[0]["text"]
+    assert "escalate" in blocks[0]["text"].lower()
+
+
+def test_call_claude_escalates_model(monkeypatch, temp_env):
+    import anthropic
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    pipeline._interrupt.clear()
+
+    class EscalateBlock:
+        type = "tool_use"
+        id = "tu_esc"
+        name = "escalate"
+        input = {}
+
+    class EscalateResponse:
+        content = [EscalateBlock()]
+        usage = None
+
+    class AnswerBlock:
+        type = "text"
+        text = "Deep answer."
+
+    class FinalResponse:
+        content = [AnswerBlock()]
+        usage = None
+
+    calls: list[str] = []
+
+    class FakeStream:
+        def __init__(self, final):
+            self._final = final
+
+        @property
+        def text_stream(self):
+            return iter([])
+
+        def get_final_message(self):
+            return self._final
+
+    class FakeCM:
+        def __init__(self, final):
+            self._stream = FakeStream(final)
+
+        def __enter__(self):
+            return self._stream
+
+        def __exit__(self, *exc):
+            return False
+
+    class FakeMessages:
+        def stream(self, **kwargs):
+            calls.append(kwargs["model"])
+            final = EscalateResponse() if len(calls) == 1 else FinalResponse()
+            return FakeCM(final)
+
+    class FakeClient:
+        messages = FakeMessages()
+
+    monkeypatch.setattr(anthropic, "Anthropic", lambda **kw: FakeClient())
+
+    from config import Config
+
+    cfg = Config(claude_model_fast="claude-haiku-4-5", claude_model_smart="claude-sonnet-4-6")
+    reply, model, _cost, _spoken = pipeline._call_claude("plan my week", cfg)
+    assert calls == ["claude-haiku-4-5", "claude-sonnet-4-6"]
+    assert model == "claude-sonnet-4-6"
+    assert reply == "Deep answer."
