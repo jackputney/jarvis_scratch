@@ -19,8 +19,13 @@ from typing import Any
 PROVIDERS = ("anthropic", "openai", "gemini")
 
 
-def get_llm_client(cfg: Any, timeout: float = 60.0) -> Any:
-    provider = (getattr(cfg, "llm_provider", "anthropic") or "anthropic").strip().lower()
+def get_llm_client(cfg: Any, timeout: float = 60.0, provider: str | None = None) -> Any:
+    """Return an Anthropic-shaped client for `provider` (or cfg.llm_provider).
+
+    When the router has already chosen a provider for the turn, pass it explicitly
+    so this doesn't re-read cfg.llm_provider (which may be the "auto" sentinel).
+    """
+    provider = (provider or getattr(cfg, "llm_provider", "anthropic") or "anthropic").strip().lower()
 
     if provider == "openai":
         from llm.openai_client import OpenAIClient

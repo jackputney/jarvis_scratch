@@ -33,6 +33,10 @@ _PERSISTED_FIELDS = (
     "llm_provider",
     "claude_model_fast",
     "claude_model_smart",
+    "openai_model_fast",
+    "openai_model_smart",
+    "gemini_model_fast",
+    "gemini_model_smart",
     "routing_word_threshold",
     "whisper_model",
     "stt_backend",
@@ -64,9 +68,13 @@ _PERSISTED_FIELDS = (
 
 @dataclass
 class Config:
-    llm_provider: str = "anthropic"  # anthropic | openai | gemini
+    llm_provider: str = "anthropic"  # anthropic | openai | gemini | auto (per-turn routing)
     claude_model_fast: str = "claude-haiku-4-5"
     claude_model_smart: str = "claude-sonnet-4-6"
+    openai_model_fast: str = "gpt-4o-mini"
+    openai_model_smart: str = "gpt-4o"
+    gemini_model_fast: str = "gemini-2.5-flash"
+    gemini_model_smart: str = "gemini-2.5-pro"
     routing_word_threshold: int = 20
     whisper_model: str = "tiny"
     stt_backend: str = "mlx"
@@ -114,6 +122,10 @@ class Config:
             llm_provider=data.get("llm_provider", cls.llm_provider),
             claude_model_fast=data.get("claude_model_fast", cls.claude_model_fast),
             claude_model_smart=data.get("claude_model_smart", cls.claude_model_smart),
+            openai_model_fast=data.get("openai_model_fast", cls.openai_model_fast),
+            openai_model_smart=data.get("openai_model_smart", cls.openai_model_smart),
+            gemini_model_fast=data.get("gemini_model_fast", cls.gemini_model_fast),
+            gemini_model_smart=data.get("gemini_model_smart", cls.gemini_model_smart),
             routing_word_threshold=data.get("routing_word_threshold", cls.routing_word_threshold),
             whisper_model=data.get("whisper_model", cls.whisper_model),
             stt_backend=data.get("stt_backend", cls.stt_backend),
