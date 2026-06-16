@@ -42,6 +42,7 @@ _PERSISTED_FIELDS = (
     "ui_enabled",
     "wake_word",
     "wake_word_enabled",
+    "barge_in_enabled",
     "memory_inject_last_n_notes",
     "memory_root_path",
     "memory_auto_learn",
@@ -74,6 +75,7 @@ class Config:
     ui_enabled: bool = True
     wake_word: str = "hey_jarvis"
     wake_word_enabled: bool = True
+    barge_in_enabled: bool = True  # say the wake word during a reply to cut it off and ask again
     memory_inject_last_n_notes: int = 5
     memory_root_path: str = ""
     memory_auto_learn: bool = True
@@ -117,6 +119,7 @@ class Config:
             ui_enabled=data.get("ui_enabled", cls.ui_enabled),
             wake_word=data.get("wake_word", cls.wake_word),
             wake_word_enabled=data.get("wake_word_enabled", cls.wake_word_enabled),
+            barge_in_enabled=data.get("barge_in_enabled", cls.barge_in_enabled),
             memory_inject_last_n_notes=data.get(
                 "memory_inject_last_n_notes", cls.memory_inject_last_n_notes
             ),

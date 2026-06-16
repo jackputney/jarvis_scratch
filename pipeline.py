@@ -10,8 +10,13 @@ audio thread reads the mic and either feeds wake detection, routes frames into a
 capture queue for the recorder, or drains them (echo guard during think/speak).
 
 Stop/interrupt is handled via request_interrupt() (UI Stop button, Escape,
-dashboard) which halts TTS and abandons the current cycle. Verbal barge-in was
-removed — it fought the mic during think/speak and caused false cut-offs.
+dashboard) which halts TTS and abandons the current cycle.
+
+Verbal barge-in (say the wake word over a reply to cut it off and ask again) is
+handled in _wait_for_job_with_bargein(): wake detection is armed only once the
+reply is actually playing (state SPEAKING), never during think/speak setup, so
+the wake utterance that started the turn can't re-fire and cause a false
+cut-off. Gated by cfg.barge_in_enabled.
 """
 
 from __future__ import annotations
@@ -866,6 +871,51 @@ def process_query(
         _query_lock.release()
 
 
+def _wait_for_job_with_bargein(
+    orchestrator: Any,
+    job_id: str,
+    cfg: Config,
+    wake_event: threading.Event,
+    capture_queue: "queue.Queue[bytes]",
+    capturing: threading.Event,
+    paused: threading.Event,
+    timeout: float = VOICE_JOB_TIMEOUT_SEC,
+) -> tuple[Any, bool]:
+    """Wait for a voice job to finish, allowing a wake-word barge-in.
+
+    Returns ``(job, barged)``. While the reply is still being generated
+    (THINKING) wake detection stays paused so the wake utterance that started
+    this turn can't re-fire and interrupt the reply "by nothing". Once audio
+    starts playing (state SPEAKING) we discard any residual wake hit and re-arm
+    detection; if the user says the wake word over the reply we cancel the turn
+    — stopping speech through the same interrupt path as the Stop button — and
+    return ``barged=True`` so the caller can immediately capture the new request.
+
+    When barge-in or the wake word is disabled this degrades to a plain
+    blocking wait.
+    """
+    bargein = cfg.barge_in_enabled and cfg.wake_word_enabled
+    armed = False
+    deadline = time.monotonic() + timeout
+    while True:
+        job = orchestrator.wait(job_id, timeout=0.1)
+        if job is None or job.done_event.is_set() or time.monotonic() > deadline:
+            return job, False
+        if not bargein:
+            continue
+        state = events.get_state().get("pipeline_state")
+        if not armed and state == "SPEAKING":
+            armed = True
+            wake_event.clear()
+            capturing.clear()
+            _drain_queue(capture_queue)
+            paused.clear()  # enable wake detection during the spoken reply
+        if armed and wake_event.is_set():
+            logger.info("🎙️  Barge-in — stopping reply to listen.")
+            orchestrator.cancel_current()
+            return job, True
+
+
 def run_pipeline(
     cfg: Config,
     state_callback: Callable[[str], None] | None = None,
@@ -980,10 +1030,25 @@ def run_pipeline(
                         set_state("IDLE")
                         break
 
-                    job = orchestrator.wait(sub.job_id, timeout=VOICE_JOB_TIMEOUT_SEC)
+                    job, barged = _wait_for_job_with_bargein(
+                        orchestrator, sub.job_id, cfg,
+                        wake_event, capture_queue, capturing, paused,
+                    )
                     push_budget_level(cfg)
                     if job is not None and job.reply:
                         logger.info("💬 Reply: %s", job.reply)
+
+                    if barged:
+                        # The user said the wake word over the reply: speech is
+                        # already stopping. Clear the interrupt so this isn't
+                        # treated as a full abort, then capture the new request
+                        # right away (the audio thread is already listening).
+                        _clear_interrupt()
+                        wake_event.clear()
+                        text = _capture_and_transcribe(
+                            capture_queue, capturing, paused, cfg, set_state,
+                        )
+                        continue
 
                     if _interrupt.is_set():
                         logger.info("⏹️  Cycle aborted.")
