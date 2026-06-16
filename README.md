@@ -1,6 +1,8 @@
 # Jarvis
 
-A fast, conversational voice AI assistant for macOS (Apple Silicon). Local wake word, Metal-accelerated STT, Claude for reasoning, streaming TTS, a minimal animated face UI, token-cost budgeting, and a localhost control dashboard.
+A fast, conversational voice AI assistant for macOS (Apple Silicon). Local wake word, Metal-accelerated STT, Claude for reasoning, streaming TTS, a premium floating orb UI, token-cost budgeting, and a localhost control dashboard.
+
+> **Full feature list:** see [FEATURES.md](FEATURES.md) for tools, integrations, memory, plugins, and dashboard views.
 
 ## The only thing you need to do
 
