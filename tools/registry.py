@@ -12,6 +12,7 @@ class hierarchy — just explicit, readable mappings.
 from __future__ import annotations
 
 from memory.knowledge import read_note, write_note
+from tools.download import download_file
 from memory.semantic import remember as remember_fact, search as search_memory_index
 from memory.variables import get_variable, set_variable
 from tools.github import create_github_comment, get_github_repo_summary, search_github_issues
@@ -42,6 +43,24 @@ TOOL_DEFINITIONS: list[dict] = [
                 },
             },
             "required": ["app_name"],
+        },
+    },
+    {
+        "name": "download_file",
+        "description": (
+            "Download a file from an http(s) URL to the user's Downloads folder. "
+            "Requires user confirmation. Validates the URL and caps the size at 100 MB."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "The http(s) URL to download."},
+                "filename": {
+                    "type": "string",
+                    "description": "Optional name to save as; otherwise inferred from the URL.",
+                },
+            },
+            "required": ["url"],
         },
     },
     {
@@ -396,6 +415,7 @@ TOOL_DEFINITIONS: list[dict] = [
 TOOL_DISPATCH: dict[str, callable] = {
     "open_app": lambda **kw: open_app(kw["app_name"]),
     "web_search": lambda **kw: web_search(kw["query"]),
+    "download_file": lambda **kw: download_file(kw["url"], kw.get("filename")),
     "set_variable": lambda **kw: (set_variable(kw["key"], kw["value"]) or f"Saved {kw['key']}={kw['value']}"),
     "get_variable": lambda **kw: (get_variable(kw["key"]) or f"No value stored for '{kw['key']}'."),
     "write_note": lambda **kw: write_note(kw["title"], kw["content"]),
@@ -465,6 +485,7 @@ AUTO_ALLOW_TOOLS = frozenset({
 
 # High-risk mutating tools — dashboard confirm required when confirm_before_execute is on.
 CONFIRM_REQUIRED_TOOLS = frozenset({
+    "download_file",
     "send_email",
     "append_row",
     "update_cell",
