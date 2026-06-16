@@ -33,7 +33,11 @@ from datetime import date
 from typing import Any
 
 import anthropic
-import pyaudio
+
+try:
+    import pyaudio
+except ImportError:
+    pyaudio = None  # type: ignore[assignment]  # optional — sounddevice is the preferred backend
 
 try:
     import webrtcvad
@@ -72,7 +76,7 @@ AUDIO_RATE = 16000
 FRAME_DURATION_MS = 30
 FRAME_SIZE = int(AUDIO_RATE * FRAME_DURATION_MS / 1000)
 CHANNELS = 1
-PA_FORMAT = pyaudio.paInt16
+PA_FORMAT = pyaudio.paInt16 if pyaudio is not None else None
 SAMPLE_WIDTH = 2
 MAX_RECORD_SECONDS = 20
 POST_SPEECH_SILENCE_FRAMES = 25  # fallback if config not passed
@@ -257,6 +261,11 @@ def _audio_loop(
         use_sounddevice = True
         logger.info("🎤 Audio input: sounddevice")
     except Exception as exc:  # noqa: BLE001
+        if pyaudio is None:
+            raise RuntimeError(
+                "No audio backend available: sounddevice failed to open and PyAudio "
+                "isn't installed."
+            ) from exc
         logger.info("🎤 Audio input: PyAudio (sounddevice unavailable: %s)", exc)
         pa = pyaudio.PyAudio()
         pa_stream = pa.open(
