@@ -141,8 +141,8 @@ _warn_state: dict[str, Any] = {"date": None}
 
 # Map user-facing wake_word config values to openwakeword pretrained model ids.
 WAKE_WORD_MODELS: dict[str, str] = {
-    "hey jarvis": "hey_jarvis_v0.1",
-    "alexa": "alexa_v0.1",
+    "hey jarvis": "hey_jarvis",
+    "alexa": "alexa",
 }
 
 
@@ -158,7 +158,7 @@ def resolve_wake_model(wake_word: str) -> str:
             return wake_word
     except ImportError:
         pass
-    return WAKE_WORD_MODELS.get("hey jarvis", "hey_jarvis_v0.1")
+    return WAKE_WORD_MODELS.get("hey jarvis", "hey_jarvis")
 
 
 def prepare_wake_word_model(wake_word: str) -> None:
