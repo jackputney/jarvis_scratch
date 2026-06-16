@@ -315,6 +315,17 @@ def create_app() -> Flask:
         removed = knowledge.delete_note(title)
         return jsonify({"ok": removed})
 
+    @app.route("/api/contacts")
+    def api_contacts():  # noqa: ANN202
+        """Return the user's Google Contacts for the dashboard."""
+        try:
+            from tools.google_contacts import list_contacts_full
+
+            contacts = list_contacts_full(count=200)
+            return jsonify({"contacts": contacts})
+        except Exception as exc:  # noqa: BLE001
+            return jsonify({"contacts": [], "error": str(exc)})
+
     # -- Semantic memory ----------------------------------------------------
     @app.route("/api/memory/info")
     def api_memory_info():  # noqa: ANN202

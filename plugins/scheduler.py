@@ -48,7 +48,9 @@ class PluginScheduler:
         logger.info("Cron firing plugin '%s'", plugin.get("name"))
         prompt = (plugin.get("prompt") or "").strip()
         if prompt:
-            self._orchestrator.submit(Command(text=prompt, source=CommandSource.SCHEDULE, speak=False))
+            self._orchestrator.submit(
+                Command(text=prompt, source=CommandSource.SCHEDULE, speak=True),
+            )
         if self._running:
             self._schedule_next(plugin)
 
@@ -58,6 +60,10 @@ class PluginScheduler:
             for timer in self._timers:
                 timer.cancel()
             self._timers.clear()
+
+    def _parse_interval(self, cron_expr: str) -> int | None:
+        """Parse basic cron expressions — seconds until next fire."""
+        return _seconds_until_next(cron_expr)
 
 
 def _seconds_until_next(cron_expr: str) -> int | None:

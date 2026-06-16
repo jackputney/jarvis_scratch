@@ -93,7 +93,10 @@ STATIC_SYSTEM_INSTRUCTIONS = (
     "You start on the fast model. If a request needs careful multi-step reasoning, "
     "planning, analysis, coding, or nuanced writing, call the escalate tool FIRST and "
     "stop — the smart model takes over with full context. Handle simple lookups, "
-    "chit-chat, and single tool actions yourself without escalating."
+    "chit-chat, and single tool actions yourself without escalating.\n\n"
+    "## Time and date\n"
+    "For time or date questions, always call get_current_time — never guess or use "
+    "training data for the current time."
 )
 
 WARN_80_MESSAGE = "Heads up, I'm at 80 percent of today's budget."
@@ -857,7 +860,9 @@ def process_query(
         if _should_store_in_history(reply):
             conversation.add_turn(text, reply)
             record_exchange(text, reply, cfg)
-        events.record_conversation(text, reply or "(interrupted)", model, latency_ms, cost)
+        cleaned_reply = (reply or "").strip()
+        if cleaned_reply:
+            events.record_conversation(text, cleaned_reply, model, latency_ms, cost)
         logger.info("💰 Call cost $%.4f (%dms) — %s", cost, latency_ms, model)
         return {"reply": reply, "warning": warning, "capped": False, "busy": False,
                 "model": model, "latency_ms": latency_ms, "cost": cost,

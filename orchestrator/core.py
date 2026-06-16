@@ -221,8 +221,11 @@ class Orchestrator:
             else:
                 job.state = JobState.DONE
 
-            self._emit("job.transcript", job_id=command.id, heard=command.text,
-                       reply=job.reply, model=job.model, state=job.state.value)
+            if job.reply.strip():
+                self._emit("job.transcript", job_id=command.id, heard=command.text,
+                           reply=job.reply, model=job.model, state=job.state.value)
+            elif command.source == CommandSource.SCHEDULE:
+                logger.debug("Empty reply from scheduled plugin — no TTS.")
 
             speakable = (
                 command.speak

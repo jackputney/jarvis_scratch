@@ -1,0 +1,13 @@
+{
+  "name": "calendar_reminder",
+  "description": "Check calendar every 30 minutes and announce upcoming events",
+  "version": "1.0.0",
+  "trigger": {
+    "type": "cron",
+    "schedule": "*/30 * * * *"
+  },
+  "prompt": "Check my calendar for events starting in the next 45 minutes. If there are any, give me a brief spoken heads-up: the event name, time, and location or meeting link if present. If nothing is coming up, say nothing — do not respond at all. Keep it under 20 words per event.",
+  "risk_tier": "read_only",
+  "requires": ["google"],
+  "enabled": true
+}

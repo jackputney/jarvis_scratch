@@ -22,6 +22,7 @@ from tools.google_gmail import get_unread_emails, list_recent_emails, search_ema
 from tools.google_sheets import append_row, read_sheet, update_cell
 from tools.slack import read_slack_channel, send_slack_message
 from tools.system import open_app
+from tools.time_date import get_current_time
 from tools.weather import get_weather
 from tools.web import web_search
 
@@ -42,6 +43,27 @@ TOOL_DEFINITIONS: list[dict] = [
                 },
             },
             "required": ["app_name"],
+        },
+    },
+    {
+        "name": "get_current_time",
+        "description": (
+            "Get the current date, time, day of week, and timezone. Call this whenever "
+            "the user asks what time or date it is, or when you need to know 'now' for "
+            "calendar or scheduling context."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "timezone": {
+                    "type": "string",
+                    "description": (
+                        "IANA timezone name (e.g. 'America/Los_Angeles'). "
+                        "Leave empty for system local time."
+                    ),
+                },
+            },
+            "required": [],
         },
     },
     {
@@ -395,6 +417,7 @@ TOOL_DEFINITIONS: list[dict] = [
 
 TOOL_DISPATCH: dict[str, callable] = {
     "open_app": lambda **kw: open_app(kw["app_name"]),
+    "get_current_time": lambda **kw: get_current_time(kw.get("timezone", "")),
     "web_search": lambda **kw: web_search(kw["query"]),
     "set_variable": lambda **kw: (set_variable(kw["key"], kw["value"]) or f"Saved {kw['key']}={kw['value']}"),
     "get_variable": lambda **kw: (get_variable(kw["key"]) or f"No value stored for '{kw['key']}'."),
@@ -437,6 +460,7 @@ READ_ONLY_TOOLS = frozenset({
     "get_variable",
     "read_note",
     "search_memory",
+    "get_current_time",
     "web_search",
     "get_weather",
     "get_calendar_events",

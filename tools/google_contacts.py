@@ -124,3 +124,47 @@ def get_contact_names(limit: int = 200) -> list[str]:
                 seen.add(name)
                 names.append(name)
     return names
+
+
+def _get_initials(name: str) -> str:
+    parts = name.split()
+    if len(parts) >= 2:
+        return (parts[0][0] + parts[-1][0]).upper()
+    return name[0].upper() if name else "?"
+
+
+def list_contacts_full(count: int = 200) -> list[dict]:
+    """Return structured contact data for the dashboard UI."""
+    service = _service()
+    results = service.people().connections().list(
+        resourceName="people/me",
+        pageSize=min(count, 200),
+        personFields="names,emailAddresses,phoneNumbers,organizations,photos",
+        sortOrder="LAST_NAME_ASCENDING",
+    ).execute()
+
+    contacts: list[dict] = []
+    for person in results.get("connections", []):
+        names = person.get("names", [{}])
+        emails = person.get("emailAddresses", [])
+        phones = person.get("phoneNumbers", [])
+        orgs = person.get("organizations", [])
+        photos = person.get("photos", [])
+
+        display_name = names[0].get("displayName", "") if names else ""
+        if not display_name:
+            continue
+
+        contacts.append({
+            "name": display_name,
+            "first_name": names[0].get("givenName", "") if names else "",
+            "last_name": names[0].get("familyName", "") if names else "",
+            "email": emails[0].get("value", "") if emails else "",
+            "phone": phones[0].get("value", "") if phones else "",
+            "organization": orgs[0].get("name", "") if orgs else "",
+            "title": orgs[0].get("title", "") if orgs else "",
+            "photo_url": photos[0].get("url", "") if photos else "",
+            "initials": _get_initials(display_name),
+        })
+
+    return contacts

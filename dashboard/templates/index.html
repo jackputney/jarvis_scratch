@@ -37,6 +37,9 @@
         <button type="button" class="nav-item" data-view="memory">
           <i class="ti ti-brain nav-ico" aria-hidden="true"></i><span>Memory</span>
         </button>
+        <button type="button" class="nav-item" data-view="contacts">
+          <i class="ti ti-address-book nav-ico" aria-hidden="true"></i><span>Contacts</span>
+        </button>
         <button type="button" class="nav-item" data-view="plugins">
           <i class="ti ti-puzzle nav-ico" aria-hidden="true"></i><span>Plugins</span>
         </button>
@@ -85,6 +88,11 @@
             <i class="ti ti-puzzle metric-ico" aria-hidden="true"></i>
             <div class="metric-val" id="metric-plugins">0</div>
             <div class="metric-lbl">Active plugins</div>
+          </article>
+          <article class="metric-card">
+            <i class="ti ti-address-book metric-ico" aria-hidden="true"></i>
+            <div class="metric-val" id="metric-contacts">—</div>
+            <div class="metric-lbl">Contacts</div>
           </article>
         </div>
 
@@ -204,6 +212,19 @@
               </div>
             </div>
           </div>
+        </div>
+      </section>
+
+      <!-- Contacts -->
+      <section id="view-contacts" class="view" data-view="contacts">
+        <header class="view-header">
+          <h1>Contacts</h1>
+          <p class="sub">Google Contacts — click to email or copy details</p>
+        </header>
+        <div class="panel wide contacts-panel">
+          <input type="text" class="dock-input contacts-search" id="contacts-search"
+                 placeholder="Search contacts…" autocomplete="off" />
+          <div id="contacts-list" class="contacts-list" role="list"></div>
         </div>
       </section>
 

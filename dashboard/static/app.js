@@ -41,7 +41,25 @@ const STATE_LABELS = {
   SPEAKING: "Speaking",
 };
 
-const VIEW_ORDER = ["overview", "activity", "tools", "memory", "plugins", "hub", "settings"];
+const VIEW_ORDER = ["overview", "activity", "tools", "memory", "contacts", "plugins", "hub", "settings"];
+
+const AVATAR_COLORS = [
+  { bg: "var(--accent-subtle)", color: "var(--accent)" },
+  { bg: "rgba(52, 211, 153, 0.12)", color: "var(--good)" },
+  { bg: "rgba(251, 191, 36, 0.12)", color: "var(--warn)" },
+  { bg: "rgba(248, 113, 113, 0.12)", color: "var(--danger)" },
+  { bg: "rgba(96, 165, 250, 0.12)", color: "#60A5FA" },
+  { bg: "rgba(236, 72, 153, 0.1)", color: "#EC4899" },
+  { bg: "rgba(139, 92, 246, 0.1)", color: "#8B5CF6" },
+  { bg: "rgba(34, 197, 94, 0.1)", color: "#22C55E" },
+  { bg: "var(--accent-subtle)", color: "var(--accent)" },
+];
+
+function avatarColor(name) {
+  const ch = (name || "?").charCodeAt(0);
+  const i = Math.floor((Math.max(65, ch) - 65) / 3) % AVATAR_COLORS.length;
+  return AVATAR_COLORS[Math.max(0, i)];
+}
 
 // ---- Toasts -----------------------------------------------------------
 function showToast(message, kind = "info", ms = 3200) {
@@ -87,6 +105,7 @@ function switchView(name) {
   $$(".view").forEach((v) => v.classList.toggle("active", v.dataset.view === name));
   if (name === "tools" && !_toolsLoaded) loadTools();
   if (name === "plugins") loadPluginsView();
+  if (name === "contacts") loadContactsView();
   if (name === "overview") loadOverviewPlugins();
   document.dispatchEvent(new CustomEvent("jarvis:view", { detail: name }));
 }
@@ -94,6 +113,11 @@ function switchView(name) {
 window.jarvisShowView = switchView;
 
 $$(".nav-item").forEach((b) => (b.onclick = () => switchView(b.dataset.view)));
+
+const contactsSearch = $("contacts-search");
+if (contactsSearch) {
+  contactsSearch.addEventListener("input", (e) => filterContacts(e.target.value));
+}
 
 // ---- Memory tabs ------------------------------------------------------
 $$(".memory-tab").forEach((tab) => {
@@ -112,8 +136,130 @@ async function loadMetrics() {
     $("metric-queries").textContent = String(m.queries_today ?? 0);
     $("metric-tools").textContent = String(m.tools_today ?? 0);
     $("metric-uptime").textContent = m.uptime_display || fmtUptime(m.uptime_seconds).replace("up ", "");
+    try {
+      const contactsData = await getJSON("/api/contacts");
+      const count = (contactsData.contacts || []).length;
+      $("metric-contacts").textContent = contactsData.error ? "—" : String(count);
+    } catch {
+      /* transient */
+    }
   } catch {
     /* transient */
+  }
+}
+
+function contactsSkeleton() {
+  const list = $("contacts-list");
+  if (!list) return;
+  list.innerHTML = "";
+  for (let i = 0; i < 4; i++) {
+    const row = document.createElement("div");
+    row.className = "contact-skeleton";
+    row.innerHTML = '<div class="contact-skeleton-avatar"></div><div class="contact-skeleton-lines"><span></span><span></span></div>';
+    list.appendChild(row);
+  }
+}
+
+function filterContacts(query) {
+  const q = (query || "").toLowerCase();
+  document.querySelectorAll(".contact-card").forEach((card) => {
+    const name = (card.dataset.name || "").toLowerCase();
+    const email = (card.dataset.email || "").toLowerCase();
+    const org = (card.dataset.org || "").toLowerCase();
+    card.style.display = name.includes(q) || email.includes(q) || org.includes(q) ? "" : "none";
+  });
+}
+
+window.filterContacts = filterContacts;
+
+function composeEmailTo(email) {
+  if (!email) return;
+  const input = $("dock-input");
+  input.value = `send email to ${email} subject `;
+  input.focus();
+}
+
+function copyContactText(text, label) {
+  if (!text) return;
+  navigator.clipboard.writeText(text).then(
+    () => showToast(`${label} copied`, "ok"),
+    () => showToast("Could not copy", "err")
+  );
+}
+
+function renderContactCard(c) {
+  const orgLine = [c.organization, c.title].filter(Boolean).join(" · ");
+  const colors = avatarColor(c.name);
+  const card = document.createElement("div");
+  card.className = "contact-card";
+  card.dataset.name = c.name || "";
+  card.dataset.email = c.email || "";
+  card.dataset.org = c.organization || "";
+  let detailLine = "";
+  if (c.email || c.phone) {
+    const parts = [];
+    if (c.email) parts.push(`<a href="#" class="contact-email-link">${esc(c.email)}</a>`);
+    if (c.phone) parts.push(esc(c.phone));
+    detailLine = `<div class="contact-detail">${parts.join(" · ")}</div>`;
+  }
+  card.innerHTML =
+    `<div class="contact-avatar" style="background:${colors.bg};color:${colors.color}">${esc(c.initials || "?")}</div>` +
+    `<div class="contact-body">` +
+    `<div class="contact-name">${esc(c.name)}</div>` +
+    (orgLine ? `<div class="contact-detail">${esc(orgLine)}</div>` : "") +
+    detailLine +
+    `</div>` +
+    `<div class="contact-actions">` +
+    (c.email
+      ? `<button type="button" class="contact-action-btn" title="Email" data-action="email" data-email="${esc(c.email)}"><i class="ti ti-mail"></i></button>`
+      : "") +
+    (c.email
+      ? `<button type="button" class="contact-action-btn" title="Copy email" data-action="copy-email" data-copy="${esc(c.email)}"><i class="ti ti-copy"></i></button>`
+      : "") +
+    (c.phone
+      ? `<button type="button" class="contact-action-btn" title="Copy phone" data-action="copy-phone" data-copy="${esc(c.phone)}"><i class="ti ti-phone"></i></button>`
+      : "") +
+    `</div>`;
+  card.querySelectorAll("[data-action='email']").forEach((btn) => {
+    btn.onclick = (e) => {
+      e.preventDefault();
+      composeEmailTo(btn.dataset.email);
+    };
+  });
+  card.querySelectorAll("[data-action='copy-email'], [data-action='copy-phone']").forEach((btn) => {
+    btn.onclick = () => copyContactText(btn.dataset.copy, btn.title || "Value");
+  });
+  const emailLink = card.querySelector(".contact-email-link");
+  if (emailLink) {
+    emailLink.onclick = (e) => {
+      e.preventDefault();
+      composeEmailTo(c.email);
+    };
+  }
+  return card;
+}
+
+async function loadContactsView() {
+  const list = $("contacts-list");
+  if (!list) return;
+  contactsSkeleton();
+  try {
+    const data = await getJSON("/api/contacts");
+    list.innerHTML = "";
+    const contacts = data.contacts || [];
+    if (data.error && !contacts.length) {
+      list.innerHTML = `<p class="contacts-empty">No contacts found. Connect Google in Hub → Connections.</p>`;
+      return;
+    }
+    if (!contacts.length) {
+      list.innerHTML = `<p class="contacts-empty">No contacts found. Connect Google in Hub → Connections.</p>`;
+      return;
+    }
+    contacts.forEach((c) => list.appendChild(renderContactCard(c)));
+    const search = $("contacts-search");
+    if (search && search.value) filterContacts(search.value);
+  } catch {
+    list.innerHTML = `<p class="contacts-empty">Could not load contacts.</p>`;
   }
 }
 
@@ -157,10 +303,19 @@ async function loadPluginsView() {
     const m = p.manifest || p;
     const trigger = m.trigger || {};
     const hook = trigger.type === "webhook" ? `http://127.0.0.1:7777/hooks/${p.slug || m.name}` : "";
+    const enabled = p.enabled !== false;
+    const scheduleHint =
+      trigger.type === "cron" && trigger.schedule && trigger.schedule.startsWith("*/")
+        ? ` · every ${trigger.schedule.split(" ")[0].replace("*/", "")} min`
+        : "";
     li.innerHTML =
+      `<div class="plugin-card-head">` +
       `<strong>${esc(m.name || p.slug)}</strong>` +
+      `<span class="plugin-status ${enabled ? "active" : "inactive"}">` +
+      `<span class="status-dot ${enabled ? "idle" : ""}"></span>${enabled ? "Active" : "Disabled"}</span>` +
+      `</div>` +
       `<span class="sub">${esc(m.description || "")}</span>` +
-      `<span class="sub">${esc(trigger.type || "manual")}${trigger.schedule ? " · " + esc(trigger.schedule) : ""}</span>` +
+      `<span class="sub">${esc(trigger.type || "manual")}${trigger.schedule ? " · " + esc(trigger.schedule) : ""}${scheduleHint}</span>` +
       (hook ? `<code class="hook-url">${esc(hook)}</code>` : "");
     list.appendChild(li);
   });
@@ -770,7 +925,7 @@ document.addEventListener("keydown", (e) => {
       return;
     }
     const num = parseInt(e.key, 10);
-    if (num >= 1 && num <= 7) {
+    if (num >= 1 && num <= VIEW_ORDER.length) {
       e.preventDefault();
       switchView(VIEW_ORDER[num - 1]);
     }
