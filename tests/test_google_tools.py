@@ -34,6 +34,10 @@ def test_get_credentials_loads_existing_token(tmp_path, monkeypatch):
 def test_google_secret_read_from_config_env(monkeypatch):
     monkeypatch.setenv("GOOGLE_CLIENT_ID", "cid.apps.googleusercontent.com")
     monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "GOCSPX-test-secret")
+    # Drop any cached Config so the monkeypatched env is what gets read (otherwise
+    # a real GOOGLE_CLIENT_ID from .env, cached earlier in the session, wins).
+    import config
+    config.Config.invalidate_cache()
     import tools.google_auth as ga
     cfg = ga._client_config()
     assert cfg["installed"]["client_id"] == "cid.apps.googleusercontent.com"

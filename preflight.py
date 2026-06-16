@@ -52,17 +52,22 @@ if not cfg.cartesia_api_key:
 else:
     print("  ✅ CARTESIA_API_KEY present")
 
-# -- PyAudio / microphone -----------------------------------------------------
+# -- Microphone (sounddevice preferred, PyAudio fallback) ---------------------
 print("  🎤 Testing microphone…", end=" ", flush=True)
 try:
-    import pyaudio
-    pa = pyaudio.PyAudio()
-    info = pa.get_default_input_device_info()
-    pa.terminate()
-    print(f"ok (device: {info['name']})")
-except Exception as e:
-    errors.append(f"Microphone/PyAudio error: {e}")
-    print(f"FAILED\n    {e}")
+    import sounddevice as sd
+    info = sd.query_devices(kind="input")
+    print(f"ok (sounddevice, device: {info['name']})")
+except Exception as sd_exc:  # noqa: BLE001
+    try:
+        import pyaudio
+        pa = pyaudio.PyAudio()
+        info = pa.get_default_input_device_info()
+        pa.terminate()
+        print(f"ok (PyAudio, device: {info['name']})")
+    except Exception as pa_exc:
+        errors.append(f"Microphone error: no working backend (sounddevice: {sd_exc}; pyaudio: {pa_exc})")
+        print(f"FAILED\n    sounddevice: {sd_exc}\n    pyaudio: {pa_exc}")
 
 # -- openwakeword -------------------------------------------------------------
 print("  👂 Loading openwakeword…", end=" ", flush=True)
