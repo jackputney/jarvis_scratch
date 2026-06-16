@@ -7,6 +7,11 @@
 # Anthropic Claude API
 anthropic==0.107.1
 
+# Optional alternate LLM backends (only needed if llm_provider=openai|gemini).
+# Imported lazily, so the app runs without them on the default Anthropic path.
+openai>=1.40.0
+google-genai>=0.3.0
+
 # STT backends (set stt_backend in config.json)
 # mlx-whisper is default for Apple Silicon; faster-whisper for cross-platform
 faster-whisper>=1.0.0

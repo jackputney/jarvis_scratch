@@ -657,10 +657,9 @@ def _call_claude(
     on_state: Callable[[str], None] | None = None,
     on_sentence: Callable[[str], None] | None = None,
 ) -> tuple[str, str, float, bool]:
-    client = anthropic.Anthropic(
-        api_key=cfg.anthropic_api_key,
-        timeout=CLAUDE_HTTP_TIMEOUT_SEC,
-    )
+    from llm import get_llm_client
+
+    client = get_llm_client(cfg, timeout=CLAUDE_HTTP_TIMEOUT_SEC)
     model = cfg.claude_model_fast
     logger.info("🧠 Starting on %s (escalate tool → %s)", model, cfg.claude_model_smart)
 
