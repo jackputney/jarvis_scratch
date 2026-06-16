@@ -323,8 +323,45 @@ body::before {
 
 .overview-grid {
   display: grid;
-  grid-template-columns: 1.4fr 1fr;
+  grid-template-columns: 1.4fr 1fr 1fr;
   gap: 16px;
+}
+
+.device-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.device-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 14px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+  border: 1px solid var(--stroke);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.device-btn:hover {
+  border-color: var(--accent);
+  background: rgba(108, 123, 247, 0.08);
+}
+
+.device-btn i {
+  font-size: 20px;
+  color: var(--accent);
+}
+
+.device-btn:disabled {
+  opacity: 0.5;
+  cursor: wait;
 }
 
 /* ---- Activity feed ---- */

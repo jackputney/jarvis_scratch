@@ -106,7 +106,10 @@ function switchView(name) {
   if (name === "tools" && !_toolsLoaded) loadTools();
   if (name === "plugins") loadPluginsView();
   if (name === "contacts") loadContactsView();
-  if (name === "overview") loadOverviewPlugins();
+  if (name === "overview") {
+    loadOverviewPlugins();
+    loadDevicePanel();
+  }
   document.dispatchEvent(new CustomEvent("jarvis:view", { detail: name }));
 }
 
@@ -294,6 +297,45 @@ async function loadOverviewPlugins() {
   } catch {
     /* transient */
   }
+}
+
+const DEVICE_CONTROLS = [
+  { label: "Dark mode", icon: "ti-moon", tool: "set_appearance_mode", inputs: { mode: "dark" } },
+  { label: "Light mode", icon: "ti-sun", tool: "set_appearance_mode", inputs: { mode: "light" } },
+  { label: "Lock screen", icon: "ti-lock", tool: "lock_screen", inputs: {} },
+  { label: "Do Not Disturb", icon: "ti-bell-off", tool: "set_do_not_disturb", inputs: { enabled: true } },
+  { label: "Battery", icon: "ti-battery-2", tool: "get_battery_status", inputs: {} },
+  { label: "WiFi off", icon: "ti-wifi-off", tool: "set_wifi", inputs: { action: "off" } },
+];
+
+async function runDeviceControl(toolName, inputs) {
+  try {
+    const data = await sendJSON("/api/tools/run", "POST", { name: toolName, inputs });
+    const msg = data.result || data.error || (data.ok ? "Done." : "Failed.");
+    showToast(msg, data.ok ? "ok" : "err", data.ok ? 3200 : 5000);
+    return data;
+  } catch {
+    showToast("Device control failed (network)", "err");
+    return null;
+  }
+}
+
+function loadDevicePanel() {
+  const grid = $("device-control-grid");
+  if (!grid) return;
+  grid.innerHTML = "";
+  DEVICE_CONTROLS.forEach((ctrl) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "device-btn";
+    btn.innerHTML = `<i class="ti ${ctrl.icon}" aria-hidden="true"></i><span>${esc(ctrl.label)}</span>`;
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      await runDeviceControl(ctrl.tool, ctrl.inputs);
+      btn.disabled = false;
+    });
+    grid.appendChild(btn);
+  });
 }
 
 async function loadPluginsView() {
@@ -944,6 +986,6 @@ document.addEventListener("keydown", (e) => {
 (async function init() {
   ensureActivityEmpty();
   await loadConfig();
-  await Promise.all([loadVars(), loadNotes(), loadMemoryInfo(), loadMetrics(), loadOverviewPlugins(), refresh()]);
+  await Promise.all([loadVars(), loadNotes(), loadMemoryInfo(), loadMetrics(), loadOverviewPlugins(), loadDevicePanel(), refresh()]);
   connectEvents();
 })();

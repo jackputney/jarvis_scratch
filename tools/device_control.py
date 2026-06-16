@@ -219,3 +219,116 @@ def lock_screen() -> str:
     except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
         return f"Couldn't lock the screen: {exc}"
     return f"Locking isn't supported on {system} yet."
+
+
+# ---------------------------------------------------------------------------
+# macOS-only extras (Jack sprint 2)
+# ---------------------------------------------------------------------------
+
+def set_appearance_mode(mode: str) -> str:
+    """Switch between dark and light mode. mode: 'dark' or 'light'."""
+    if platform.system() != "Darwin":
+        return "Appearance mode control is macOS only."
+    m = (mode or "").strip().lower()
+    if m not in ("dark", "light"):
+        return f"Refused: mode must be 'dark' or 'light', not {mode!r}."
+    try:
+        flag = "true" if m == "dark" else "false"
+        script = (
+            'tell application "System Events" to tell appearance preferences '
+            f"to set dark mode to {flag}"
+        )
+        result = subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True,
+            text=True,
+            timeout=PS_TIMEOUT,
+        )
+        if result.returncode != 0:
+            return f"Couldn't change appearance mode: {(result.stderr or result.stdout or '').strip()}"
+        return f"Switched to {m} mode."
+    except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+        return f"Couldn't change appearance mode: {exc}"
+
+
+def get_battery_status() -> str:
+    """Get current battery percentage and charging status."""
+    if platform.system() != "Darwin":
+        return "Battery status is macOS only."
+    try:
+        result = subprocess.run(
+            ["pmset", "-g", "batt"],
+            capture_output=True,
+            text=True,
+            timeout=PS_TIMEOUT,
+        )
+        if result.returncode != 0:
+            return f"Couldn't read battery status: {(result.stderr or '').strip()}"
+        return result.stdout.strip() or "Could not read battery status."
+    except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+        return f"Couldn't read battery status: {exc}"
+
+
+def set_screen_saver(action: str) -> str:
+    """Start the screen saver. action: 'start'."""
+    if platform.system() != "Darwin":
+        return "Screen saver control is macOS only."
+    if (action or "").strip().lower() != "start":
+        return f"Refused: screen saver action must be 'start', not {action!r}."
+    try:
+        result = subprocess.run(
+            ["open", "-a", "ScreenSaverEngine"],
+            capture_output=True,
+            text=True,
+            timeout=PS_TIMEOUT,
+        )
+        if result.returncode != 0:
+            return f"Couldn't start screen saver: {(result.stderr or '').strip()}"
+        return "Screen saver started."
+    except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+        return f"Couldn't start screen saver: {exc}"
+
+
+def get_system_info() -> str:
+    """Get Mac system info: macOS version, chip, RAM."""
+    if platform.system() != "Darwin":
+        return "System info is macOS only."
+    try:
+        result = subprocess.run(
+            ["system_profiler", "SPSoftwareDataType", "SPHardwareDataType"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode != 0:
+            return f"Couldn't read system info: {(result.stderr or '').strip()}"
+        keywords = ("System Version", "Chip", "Memory", "Model Name")
+        lines = [
+            line.strip()
+            for line in result.stdout.split("\n")
+            if any(k in line for k in keywords)
+        ]
+        return "\n".join(lines[:6]) if lines else "Could not read system info."
+    except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+        return f"Couldn't read system info: {exc}"
+
+
+def set_wifi(action: str) -> str:
+    """Turn WiFi on or off. action: 'on' or 'off'."""
+    if platform.system() != "Darwin":
+        return "WiFi control is macOS only."
+    state = (action or "").strip().lower()
+    if state not in ("on", "off"):
+        return f"Refused: WiFi action must be 'on' or 'off', not {action!r}."
+    try:
+        result = subprocess.run(
+            ["networksetup", "-setairportpower", "en0", state],
+            capture_output=True,
+            text=True,
+            timeout=PS_TIMEOUT,
+        )
+        if result.returncode != 0:
+            return f"Couldn't change WiFi: {(result.stderr or result.stdout or '').strip()}"
+        return f"WiFi turned {state}."
+    except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+        return f"Couldn't change WiFi: {exc}"

@@ -13,13 +13,29 @@ from __future__ import annotations
 
 from memory.knowledge import read_note, write_note
 from tools.device_control import (
+    get_battery_status,
+    get_system_info,
     lock_screen,
+    set_appearance_mode,
     set_brightness,
     set_do_not_disturb,
     set_mute,
+    set_screen_saver,
     set_volume,
+    set_wifi,
 )
 from tools.download import download_file
+from tools.media import (
+    find_and_open_file,
+    find_file,
+    get_recent_files,
+    open_desktop,
+    open_downloads,
+    open_file,
+    open_photos,
+    open_podcasts,
+)
+from tools.pitch_deck import create_pitch_deck
 from memory.semantic import remember as remember_fact, search as search_memory_index
 from memory.variables import get_variable, set_variable
 from tools.github import create_github_comment, get_github_repo_summary, search_github_issues
@@ -122,6 +138,155 @@ TOOL_DEFINITIONS: list[dict] = [
         "name": "lock_screen",
         "description": "Lock the computer / workstation immediately.",
         "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "get_battery_status",
+        "description": "Get the current battery percentage and whether the Mac is charging.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "get_system_info",
+        "description": "Get Mac system information: macOS version, chip type, and RAM.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "set_appearance_mode",
+        "description": "Switch macOS between dark mode and light mode.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "mode": {"type": "string", "description": "'dark' or 'light'"},
+            },
+            "required": ["mode"],
+        },
+    },
+    {
+        "name": "set_wifi",
+        "description": "Turn WiFi on or off.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "description": "'on' or 'off'"},
+            },
+            "required": ["action"],
+        },
+    },
+    {
+        "name": "set_screen_saver",
+        "description": "Start the macOS screen saver.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "description": "'start'"},
+            },
+            "required": ["action"],
+        },
+    },
+    {
+        "name": "find_file",
+        "description": "Search for files on the user's Mac using Spotlight. Returns top 5 matches with file paths.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "File name or keyword to search for"},
+                "file_type": {
+                    "type": "string",
+                    "description": "Optional: 'pdf', 'image', 'video', 'presentation', 'doc'",
+                },
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "find_and_open_file",
+        "description": "Find a file by name and immediately open it in its default app.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "File name to find and open"},
+                "file_type": {"type": "string", "description": "Optional file type filter"},
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "open_photos",
+        "description": "Open the macOS Photos app.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Optional search term"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "open_podcasts",
+        "description": "Open the macOS Podcasts app.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Optional podcast name"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "get_recent_files",
+        "description": "Get a list of recently used files from the past 7 days.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "count": {"type": "integer", "description": "Number of files to return (default 10)"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "open_downloads",
+        "description": "Open the Downloads folder in Finder.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "open_desktop",
+        "description": "Open the Desktop folder in Finder.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "open_file",
+        "description": "Open a specific file path in its default application.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string", "description": "Absolute path to the file"},
+            },
+            "required": ["file_path"],
+        },
+    },
+    {
+        "name": "create_pitch_deck",
+        "description": (
+            "Generate a PowerPoint pitch deck on any topic. Claude writes the content, "
+            "saves a .pptx file to Downloads, and opens it automatically."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "topic": {
+                    "type": "string",
+                    "description": "The topic or title of the pitch deck",
+                },
+                "slide_count": {
+                    "type": "integer",
+                    "description": "Number of slides (default 5, max 15)",
+                },
+                "style": {
+                    "type": "string",
+                    "description": "Visual style: 'professional' (dark), 'light', or 'bold'",
+                },
+            },
+            "required": ["topic"],
+        },
     },
     {
         "name": "download_file",
@@ -500,6 +665,25 @@ TOOL_DISPATCH: dict[str, callable] = {
     "set_brightness": lambda **kw: set_brightness(kw["level"]),
     "set_do_not_disturb": lambda **kw: set_do_not_disturb(bool(kw["enabled"])),
     "lock_screen": lambda **kw: lock_screen(),
+    "get_battery_status": lambda **kw: get_battery_status(),
+    "get_system_info": lambda **kw: get_system_info(),
+    "set_appearance_mode": lambda **kw: set_appearance_mode(kw["mode"]),
+    "set_wifi": lambda **kw: set_wifi(kw["action"]),
+    "set_screen_saver": lambda **kw: set_screen_saver(kw.get("action", "start")),
+    "find_file": lambda **kw: find_file(kw["query"], kw.get("file_type", "")),
+    "find_and_open_file": lambda **kw: find_and_open_file(kw["query"], kw.get("file_type", "")),
+    "open_photos": lambda **kw: open_photos(kw.get("query", "")),
+    "open_podcasts": lambda **kw: open_podcasts(kw.get("query", "")),
+    "get_recent_files": lambda **kw: get_recent_files(int(kw.get("count") or 10)),
+    "open_downloads": lambda **kw: open_downloads(),
+    "open_desktop": lambda **kw: open_desktop(),
+    "open_file": lambda **kw: open_file(kw["file_path"]),
+    "create_pitch_deck": lambda **kw: create_pitch_deck(
+        kw["topic"],
+        int(kw.get("slide_count") or 5),
+        kw.get("style", "professional"),
+        kw.get("output_dir", ""),
+    ),
     "set_variable": lambda **kw: (set_variable(kw["key"], kw["value"]) or f"Saved {kw['key']}={kw['value']}"),
     "get_variable": lambda **kw: (get_variable(kw["key"]) or f"No value stored for '{kw['key']}'."),
     "write_note": lambda **kw: write_note(kw["title"], kw["content"]),
@@ -557,6 +741,12 @@ READ_ONLY_TOOLS = frozenset({
     "read_slack_channel",
     "search_github_issues",
     "get_github_repo_summary",
+    "get_battery_status",
+    "get_system_info",
+    "find_file",
+    "get_recent_files",
+    "open_downloads",
+    "open_desktop",
 })
 
 # Low-risk mutating tools — auto-allow in voice mode (confirm gate does not apply).
@@ -567,6 +757,13 @@ AUTO_ALLOW_TOOLS = frozenset({
     "set_brightness",
     "set_do_not_disturb",
     "lock_screen",
+    "set_appearance_mode",
+    "set_screen_saver",
+    "set_wifi",
+    "open_photos",
+    "open_podcasts",
+    "find_and_open_file",
+    "open_file",
     "set_variable",
     "write_note",
     "remember",
@@ -581,6 +778,7 @@ CONFIRM_REQUIRED_TOOLS = frozenset({
     "update_cell",
     "send_slack_message",
     "create_github_comment",
+    "create_pitch_deck",
 })
 
 

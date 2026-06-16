@@ -60,3 +60,6 @@ pytest==9.0.3
 google-auth==2.29.0
 google-auth-oauthlib==1.2.0
 google-api-python-client==2.127.0
+
+# Pitch deck generation
+python-pptx>=0.6.21
