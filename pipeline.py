@@ -86,6 +86,14 @@ ANSWER_WAIT_FRAMES = int(12000 / FRAME_DURATION_MS)
 PRE_ROLL_FRAMES = 8
 WAKE_THRESHOLD = 0.55
 WAKE_CONSECUTIVE_HITS = 2
+# Mid-reply barge-in tuning. On speakers (no echo cancellation) the mic hears
+# Jarvis's own voice, so this is a balance: sensitive enough to catch "hey jarvis"
+# said over the reply, but not so sensitive that Jarvis's own audio self-triggers.
+# A short grace period keeps detection OFF for the opening words (where residual
+# echo and the just-said wake utterance would otherwise fire a false barge).
+BARGEIN_WAKE_THRESHOLD = 0.5
+BARGEIN_CONSECUTIVE_HITS = 2
+BARGEIN_GRACE_SEC = 1.5
 AUDIO_THREAD_RESTART_DELAY = 2.0
 ENERGY_VAD_THRESHOLD = 250
 HOTWORDS_TTL_SECONDS = 600
@@ -302,11 +310,19 @@ def _audio_loop(
 
             audio_int16 = np.frombuffer(data, dtype=np.int16)
             oww_model.predict(audio_int16)
+            # While a reply is playing, listen for a barge-in with a much more
+            # sensitive threshold so "hey jarvis" can cut Jarvis off mid-sentence.
+            speaking = events.get_state().get("pipeline_state") == "SPEAKING"
+            threshold = BARGEIN_WAKE_THRESHOLD if speaking else WAKE_THRESHOLD
+            hits = BARGEIN_CONSECUTIVE_HITS if speaking else WAKE_CONSECUTIVE_HITS
             for name, scores in oww_model.prediction_buffer.items():
-                if len(scores) < WAKE_CONSECUTIVE_HITS:
+                if len(scores) < hits:
                     continue
-                if all(scores[-i] > WAKE_THRESHOLD for i in range(1, WAKE_CONSECUTIVE_HITS + 1)):
-                    logger.info("🎙️  Wake word '%s' detected (score=%.2f)", name, scores[-1])
+                if all(scores[-i] > threshold for i in range(1, hits + 1)):
+                    logger.info(
+                        "🎙️  Wake word '%s' detected (score=%.2f, %s)",
+                        name, scores[-1], "barge-in" if speaking else "activate",
+                    )
                     _reset_oww(oww_model)
                     capture_queue.put(data)
                     capturing.set()
@@ -921,6 +937,7 @@ def _wait_for_job_with_bargein(
     """
     bargein = cfg.barge_in_enabled and cfg.wake_word_enabled
     armed = False
+    speaking_since: float | None = None
     deadline = time.monotonic() + timeout
     while True:
         job = orchestrator.wait(job_id, timeout=0.1)
@@ -929,12 +946,20 @@ def _wait_for_job_with_bargein(
         if not bargein:
             continue
         state = events.get_state().get("pipeline_state")
-        if not armed and state == "SPEAKING":
+        if state == "SPEAKING" and speaking_since is None:
+            # Reply just started playing. Keep detection paused through the grace
+            # window so the opening words / residual echo can't fire a false barge.
+            speaking_since = time.monotonic()
+        if (
+            not armed
+            and speaking_since is not None
+            and time.monotonic() - speaking_since >= BARGEIN_GRACE_SEC
+        ):
             armed = True
             wake_event.clear()
             capturing.clear()
             _drain_queue(capture_queue)
-            paused.clear()  # enable wake detection during the spoken reply
+            paused.clear()  # now enable wake detection for the rest of the reply
         if armed and wake_event.is_set():
             logger.info("🎙️  Barge-in — stopping reply to listen.")
             orchestrator.cancel_current()

@@ -10,9 +10,11 @@ memory/diary/
 memory/profile.md
 memory/semantic_index.db
 memory/variables.db
-memory/variables.db-shm
-memory/variables.db-wal
 memory/google_token.json
+# SQLite WAL/SHM sidecars are machine-specific — never commit (they corrupt
+# another machine's DB on checkout). Broad patterns cover every *.db.
+*.db-shm
+*.db-wal
 
 # Python
 __pycache__/

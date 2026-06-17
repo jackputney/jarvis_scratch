@@ -57,6 +57,64 @@ _local_proc: subprocess.Popen[bytes] | None = None
 _local_lock = threading.Lock()
 
 
+def _have_audio_output() -> bool:
+    """True if any PCM output backend is available (sounddevice or PyAudio)."""
+    try:
+        import sounddevice  # noqa: F401
+        return True
+    except Exception:  # noqa: BLE001
+        return _pa is not None
+
+
+class _OutputStream:
+    """PCM s16le mono output via sounddevice (preferred) or PyAudio.
+
+    sounddevice ships a bundled PortAudio binary (no build step), so the premium
+    Cartesia voice keeps working — and stays interruptible — even when PyAudio
+    isn't installed (e.g. Windows on Python 3.14). abort() drops buffered audio
+    immediately so a barge-in / Stop cuts the reply with minimal tail.
+    """
+
+    def __init__(self) -> None:
+        self._sd = None
+        self._pa_stream = None
+        try:
+            import sounddevice as sd
+
+            self._sd = sd.RawOutputStream(
+                samplerate=SAMPLE_RATE, channels=CHANNELS, dtype="int16",
+                blocksize=WRITE_FRAMES,
+            )
+            self._sd.start()
+        except Exception:  # noqa: BLE001 — fall back to PyAudio if sounddevice fails
+            self._sd = None
+            if _pa is None:
+                raise RuntimeError("no audio output backend (install sounddevice or pyaudio)")
+            self._pa_stream = _pa.open(
+                format=PA_FORMAT, channels=CHANNELS, rate=SAMPLE_RATE,
+                output=True, frames_per_buffer=WRITE_FRAMES,
+            )
+            self._pa_stream.start_stream()
+
+    def write(self, frame: bytes) -> None:
+        if self._sd is not None:
+            self._sd.write(frame)
+        else:
+            self._pa_stream.write(frame)
+
+    def close(self, abort: bool = False) -> None:
+        if self._sd is not None:
+            try:
+                self._sd.abort() if abort else self._sd.stop()
+            finally:
+                self._sd.close()
+        elif self._pa_stream is not None:
+            try:
+                self._pa_stream.stop_stream()
+            finally:
+                self._pa_stream.close()
+
+
 # ---------------------------------------------------------------------------
 # PCM playback helpers
 # ---------------------------------------------------------------------------
@@ -102,10 +160,7 @@ def _play_pcm_stream(
     chunks: Iterator[bytes],
     on_first_chunk: Callable[[], None] | None = None,
 ) -> None:
-    """Play a stream of s16le mono PCM at SAMPLE_RATE via PyAudio."""
-    if _pa is None:
-        raise RuntimeError("pyaudio not available")
-
+    """Play a stream of s16le mono PCM at SAMPLE_RATE (sounddevice or PyAudio)."""
     audio_q: queue.Queue[bytes | None | Exception] = queue.Queue(maxsize=64)
 
     def _producer() -> None:
@@ -121,14 +176,7 @@ def _play_pcm_stream(
 
     threading.Thread(target=_producer, daemon=True, name="jarvis-tts-producer").start()
 
-    stream = _pa.open(
-        format=PA_FORMAT,
-        channels=CHANNELS,
-        rate=SAMPLE_RATE,
-        output=True,
-        frames_per_buffer=WRITE_FRAMES,
-    )
-    stream.start_stream()
+    stream = _OutputStream()
 
     def _incoming() -> Iterator[bytes]:
         while True:
@@ -175,8 +223,7 @@ def _play_pcm_stream(
                     on_first_chunk()
                 stream.write(bytes(buffer[:tail]))
     finally:
-        stream.stop_stream()
-        stream.close()
+        stream.close(abort=_cancel.is_set())
 
 
 # ---------------------------------------------------------------------------
@@ -291,7 +338,7 @@ def _speak_cartesia(
         _speak_local(text)
         return
 
-    if _pa is None:
+    if not _have_audio_output():
         _speak_local(text)
         return
 
