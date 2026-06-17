@@ -44,12 +44,18 @@ def test_lerp_color_endpoints():
 
 
 def test_orb_mute_toggle():
+    import sys
+
+    from PyQt6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication(sys.argv)
     orb = OrbWidget()
     assert orb.muted is False
     orb.muted = True
     assert orb.muted is True
     orb.muted = False
     assert orb.muted is False
+    app.processEvents()
 
 
 def test_orb_click_outside_core_ignored():
@@ -85,8 +91,8 @@ def test_face_window_does_not_use_tool_flag():
     widget = FaceWidget()
     try:
         flags = widget.windowFlags()
-        assert not (int(flags) & int(Qt.WindowType.Tool))
-        assert int(flags) & int(Qt.WindowType.WindowStaysOnTopHint)
+        assert (flags & Qt.WindowType.Tool) != Qt.WindowType.Tool
+        assert flags & Qt.WindowType.WindowStaysOnTopHint
     finally:
         widget.shutdown()
         app.processEvents()

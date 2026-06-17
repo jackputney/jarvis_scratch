@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 import platform
 from collections.abc import Callable
 from enum import Enum, auto
@@ -109,6 +110,9 @@ def _panel_rect() -> QRectF:
 def _try_macos_vibrancy(widget: QWidget) -> bool:
     """Attach native macOS frosted vibrancy when pyobjc is available."""
     if platform.system() != "Darwin":
+        return False
+    # AppKit vibrancy needs a real window; offscreen Qt (pytest/CI) segfaults here.
+    if os.environ.get("QT_QPA_PLATFORM") == "offscreen":
         return False
     try:
         from ctypes import c_void_p  # noqa: PLC0415
