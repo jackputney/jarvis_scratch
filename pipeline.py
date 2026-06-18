@@ -58,6 +58,10 @@ from tts.cartesia import speak, speak_stream, stop_speech
 logger = logging.getLogger("jarvis.pipeline")
 
 _interrupt = threading.Event()
+# Set by the global hotkey handler to trigger an immediate listening turn.
+# Checked at the top of each pipeline idle loop iteration so it survives
+# across the finally-block clear of wake_event.
+_hotkey_pending = threading.Event()
 _query_lock = threading.Lock()
 _fw_model = None
 _fw_model_name: str | None = None
@@ -134,6 +138,20 @@ def request_interrupt() -> None:
     from tools import confirm as tool_confirm
     tool_confirm.cancel_pending()
     logger.info("⏹️  Stop requested — halting speech and resetting.")
+
+
+def request_wake() -> None:
+    """Signal the pipeline to start (or restart) a listening turn immediately.
+
+    Safe to call from any thread (hotkey, dashboard, tests).  If Jarvis is
+    mid-reply it will be interrupted first; the next idle loop iteration then
+    starts recording without waiting for the wake word.
+    """
+    state_name = events.get_state().get("pipeline_state", "IDLE")
+    if state_name in ("THINKING", "SPEAKING", "WAITING_CONFIRM"):
+        request_interrupt()
+    _hotkey_pending.set()
+    logger.info("⌨️  Wake requested externally (state: %s).", state_name)
 
 
 def interrupt_requested() -> bool:
@@ -1047,9 +1065,15 @@ def run_pipeline(
                 capturing.clear()
                 logger.info("💤 Waiting for wake word…")
 
-                if not wake_event.wait(timeout=1.0):
+                # Hotkey (or any external trigger) can bypass the wake word wait.
+                if _hotkey_pending.is_set():
+                    _hotkey_pending.clear()
+                    wake_event.clear()  # discard any coincident audio wake
+                    logger.info("⌨️  Hotkey wake — skipping wake word.")
+                elif not wake_event.wait(timeout=1.0):
                     continue
-                wake_event.clear()
+                else:
+                    wake_event.clear()
 
                 if is_muted is not None and is_muted():
                     logger.info("🔇 Muted — ignoring wake word.")

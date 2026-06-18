@@ -48,6 +48,8 @@ _PERSISTED_FIELDS = (
     "wake_word",
     "wake_word_enabled",
     "barge_in_enabled",
+    "hotkey_enabled",
+    "hotkey_combo",
     "memory_inject_last_n_notes",
     "memory_root_path",
     "memory_auto_learn",
@@ -86,6 +88,8 @@ class Config:
     wake_word: str = "hey_jarvis"
     wake_word_enabled: bool = True
     barge_in_enabled: bool = True  # say the wake word during a reply to cut it off and ask again
+    hotkey_enabled: bool = True  # register a global keyboard shortcut to wake Jarvis
+    hotkey_combo: str = "<ctrl>+<shift>+<space>"  # pynput format: <ctrl>/<shift>/<alt>/<cmd> + key
     memory_inject_last_n_notes: int = 5
     memory_root_path: str = ""
     memory_auto_learn: bool = True

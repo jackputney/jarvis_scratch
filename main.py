@@ -155,6 +155,19 @@ def _start_dashboard() -> None:
     threading.Thread(target=run_dashboard, daemon=True, name="jarvis-dashboard").start()
 
 
+def _start_hotkey(cfg: Config) -> None:
+    """Register the global hotkey if enabled.  Graceful if pynput missing."""
+    if not cfg.hotkey_enabled:
+        return
+    try:
+        import pipeline as _pipeline
+        from tools.hotkey import start_hotkey_listener
+
+        start_hotkey_listener(cfg.hotkey_combo, _pipeline.request_wake)
+    except Exception as exc:  # noqa: BLE001
+        print(f"⚠️  Global hotkey registration failed ({exc}). Continuing without it.")
+
+
 def _print_banner(cfg: Config) -> None:
     trigger = cfg.wake_word.replace("_", " ")
     resolved_stt = _resolve_stt_backend(cfg)
@@ -162,6 +175,8 @@ def _print_banner(cfg: Config) -> None:
     print("🤖 Jarvis is up.")
     print(f"   🗣️  Trigger phrase : “{trigger}”" + ("" if cfg.wake_word_enabled else "  (voice disabled)"))
     print(f"   📊 Dashboard      : {DASHBOARD_URL}")
+    if cfg.hotkey_enabled:
+        print(f"   ⌨️  Global hotkey  : {cfg.hotkey_combo}")
     print(f"   🧠 Models         : {cfg.claude_model_fast} (fast) / {cfg.claude_model_smart} (smart)")
     print(f"   🎧 Whisper        : {cfg.stt_model} ({resolved_stt})")
     print(f"   💰 Budget         : ${cfg.daily_budget_usd:.2f}/day · ${cfg.monthly_budget_usd:.2f}/month")
@@ -219,6 +234,7 @@ def _run_with_ui(cfg: Config) -> None:
         daemon=True,
     )
     pipeline_thread.start()
+    _start_hotkey(cfg)
 
     try:
         sys.exit(app.exec())
@@ -242,6 +258,7 @@ def _run_headless(cfg: Config) -> None:
         daemon=True,
     )
     pipeline_thread.start()
+    _start_hotkey(cfg)
 
     try:
         pipeline_thread.join()
