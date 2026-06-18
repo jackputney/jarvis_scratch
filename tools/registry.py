@@ -25,6 +25,7 @@ from tools.device_control import (
     set_wifi,
 )
 from tools.download import download_file
+from tools.login_item import disable_login_item, enable_login_item, is_login_item_enabled
 from tools.media import (
     find_and_open_file,
     find_file,
@@ -34,6 +35,15 @@ from tools.media import (
     open_file,
     open_photos,
     open_podcasts,
+)
+from tools.music import (
+    get_now_playing,
+    pause as music_pause,
+    play as music_play,
+    previous as music_previous,
+    search_and_play,
+    set_volume as music_set_volume,
+    skip as music_skip,
 )
 from tools.pitch_deck import create_pitch_deck
 from memory.semantic import remember as remember_fact, search as search_memory_index
@@ -180,6 +190,66 @@ TOOL_DEFINITIONS: list[dict] = [
                 "action": {"type": "string", "description": "'start'"},
             },
             "required": ["action"],
+        },
+    },
+    {
+        "name": "enable_login_item",
+        "description": "Enable Launch at login on macOS so Jarvis starts automatically when you log in.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "disable_login_item",
+        "description": "Disable Launch at login on macOS so Jarvis no longer starts automatically.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "music_play",
+        "description": "Start or resume playback in the macOS Music app.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "music_pause",
+        "description": "Pause playback in the macOS Music app.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "music_skip",
+        "description": "Skip to the next track in the macOS Music app.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "music_previous",
+        "description": "Go to the previous track in the macOS Music app.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "music_set_volume",
+        "description": "Set Music.app playback volume (0–100). This is not system master volume.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "level": {"type": "integer", "description": "Volume percent, 0–100."},
+            },
+            "required": ["level"],
+        },
+    },
+    {
+        "name": "get_now_playing",
+        "description": "Get the currently playing song from Music.app (title, artist, album, state).",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "search_and_play",
+        "description": (
+            "Search for a song and play the top match in Music.app (macOS). "
+            "On Windows, opens a Spotify search for the query."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Song, artist, or album to search for."},
+            },
+            "required": ["query"],
         },
     },
     {
@@ -670,6 +740,15 @@ TOOL_DISPATCH: dict[str, callable] = {
     "set_appearance_mode": lambda **kw: set_appearance_mode(kw["mode"]),
     "set_wifi": lambda **kw: set_wifi(kw["action"]),
     "set_screen_saver": lambda **kw: set_screen_saver(kw.get("action", "start")),
+    "enable_login_item": lambda **kw: enable_login_item(),
+    "disable_login_item": lambda **kw: disable_login_item(),
+    "music_play": lambda **kw: music_play(),
+    "music_pause": lambda **kw: music_pause(),
+    "music_skip": lambda **kw: music_skip(),
+    "music_previous": lambda **kw: music_previous(),
+    "music_set_volume": lambda **kw: music_set_volume(int(kw["level"])),
+    "get_now_playing": lambda **kw: get_now_playing(),
+    "search_and_play": lambda **kw: search_and_play(kw["query"]),
     "find_file": lambda **kw: find_file(kw["query"], kw.get("file_type", "")),
     "find_and_open_file": lambda **kw: find_and_open_file(kw["query"], kw.get("file_type", "")),
     "open_photos": lambda **kw: open_photos(kw.get("query", "")),
@@ -770,6 +849,19 @@ AUTO_ALLOW_TOOLS = frozenset({
     "escalate",
 })
 
+# Moderate-risk tools — dashboard confirm in voice mode when confirm_before_execute is on.
+MODERATE_TOOLS = frozenset({
+    "enable_login_item",
+    "disable_login_item",
+    "music_play",
+    "music_pause",
+    "music_skip",
+    "music_previous",
+    "music_set_volume",
+    "get_now_playing",
+    "search_and_play",
+})
+
 # High-risk mutating tools — dashboard confirm required when confirm_before_execute is on.
 CONFIRM_REQUIRED_TOOLS = frozenset({
     "download_file",
@@ -809,7 +901,7 @@ def dispatch_tool(
     if name not in TOOL_DISPATCH:
         return f"Unknown tool: {name}"
 
-    if confirm and name in CONFIRM_REQUIRED_TOOLS:
+    if confirm and name in (CONFIRM_REQUIRED_TOOLS | MODERATE_TOOLS):
         from tools import confirm as confirm_mod
 
         decision = confirm_mod.wait_for_confirm(

@@ -9,8 +9,9 @@ from pathlib import Path
 from typing import Any
 
 from config import Config
+from paths import hub_integrations_path
 
-INTEGRATIONS_PATH = Path(__file__).parent / "integrations.json"
+INTEGRATIONS_PATH = hub_integrations_path()
 
 # Non-secret integration field keys that map to config.json attributes.
 FIELD_TO_CONFIG: dict[str, str] = {

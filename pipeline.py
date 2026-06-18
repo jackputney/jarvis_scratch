@@ -1063,7 +1063,7 @@ def run_pipeline(
 
                 paused.clear()
                 capturing.clear()
-                logger.info("💤 Waiting for wake word…")
+                logger.debug("💤 Waiting for wake word…")
 
                 # Hotkey (or any external trigger) can bypass the wake word wait.
                 if _hotkey_pending.is_set():

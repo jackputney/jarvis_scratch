@@ -83,7 +83,8 @@ def test_webhook_handler_matches_plugin(client, temp_env, tmp_path, monkeypatch)
         "prompt": "Process alert",
         "risk_tier": "read_only",
     }), encoding="utf-8")
-    monkeypatch.setattr("plugins.loader.DEFAULT_PLUGINS_DIR", tmp_path)
+    monkeypatch.setattr("paths.bundled_plugins_dir", lambda: tmp_path)
+    monkeypatch.setattr("paths.user_plugins_dir", lambda: tmp_path / "user_plugins")
     r = client.post("/hooks/alert_hook", json={"event": "ping"})
     assert r.status_code == 200
     assert r.get_json()["ok"] is True
@@ -91,7 +92,8 @@ def test_webhook_handler_matches_plugin(client, temp_env, tmp_path, monkeypatch)
 
 
 def test_webhook_handler_unknown_plugin_returns_404(client, tmp_path, monkeypatch):
-    monkeypatch.setattr("plugins.loader.DEFAULT_PLUGINS_DIR", tmp_path)
+    monkeypatch.setattr("paths.bundled_plugins_dir", lambda: tmp_path)
+    monkeypatch.setattr("paths.user_plugins_dir", lambda: tmp_path / "user_plugins")
     r = client.post("/hooks/unknown", json={})
     assert r.status_code == 404
 

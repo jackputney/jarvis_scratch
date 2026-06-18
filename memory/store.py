@@ -36,7 +36,11 @@ def resolve_memory_root(cfg: "Config | None" = None) -> Path:
         root = Path(custom).expanduser().resolve()
         root.mkdir(parents=True, exist_ok=True)
         return root
-    return _PROJECT_MEMORY.resolve()
+    from paths import is_frozen, user_memory_root
+
+    if is_frozen():
+        return user_memory_root()
+    return Path(__file__).parent.resolve()
 
 
 def notes_dir(cfg: "Config | None" = None) -> Path:

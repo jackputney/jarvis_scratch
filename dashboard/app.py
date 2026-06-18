@@ -31,6 +31,9 @@ Endpoints:
   POST /api/hub/keys         → save integration credentials
   POST /api/hub/google/auth  → start Google OAuth (non-blocking)
   GET  /api/plugins          → list plugin manifests
+  GET  /api/email/unread     → unread Gmail summaries for the triage view
+  POST /api/email/draft-reply → Claude draft for replying to one message
+  GET  /api/calendar/day     → calendar events for one day (YYYY-MM-DD)
 """
 
 from __future__ import annotations
@@ -50,12 +53,14 @@ from config import Config
 from dashboard.hub_routes import hub_bp, list_plugin_manifests
 from memory import knowledge, variables
 
+from paths import dashboard_static_dir, dashboard_templates_dir
+
 logger = logging.getLogger("jarvis.dashboard")
 
 HOST = "127.0.0.1"
 PORT = 7777
 _START_TIME = time.time()
-_STATIC_DIR = Path(__file__).resolve().parent / "static"
+_STATIC_DIR = dashboard_static_dir()
 
 
 def _static_version() -> str:
@@ -128,7 +133,11 @@ def _initial_sse_payloads() -> list[str]:
 
 
 def create_app() -> Flask:
-    app = Flask(__name__, static_folder="static", template_folder="templates")
+    app = Flask(
+        __name__,
+        static_folder=str(dashboard_static_dir()),
+        template_folder=str(dashboard_templates_dir()),
+    )
     app.config["JSON_SORT_KEYS"] = False
     _ensure_bus_subscription()
     app.register_blueprint(hub_bp)
@@ -210,12 +219,67 @@ def create_app() -> Flask:
         cfg = Config.update_persisted(changes)
         return jsonify({"ok": True, "config": cfg.to_persisted_dict()})
 
+    @app.route("/api/login-item", methods=["GET"])
+    def api_login_item_get():  # noqa: ANN202
+        import platform
+
+        from paths import launch_at_login_mode
+        from tools.login_item import is_login_item_enabled
+
+        supported = platform.system() == "Darwin"
+        return jsonify({
+            "supported": supported,
+            "enabled": is_login_item_enabled() if supported else False,
+            "mode": launch_at_login_mode() if supported else None,
+        })
+
+    @app.route("/api/login-item", methods=["POST"])
+    def api_login_item_post():  # noqa: ANN202
+        import platform
+
+        from tools.login_item import disable_login_item, enable_login_item, is_login_item_enabled
+
+        if platform.system() != "Darwin":
+            return jsonify({"ok": False, "error": "Launch at login is macOS only."}), 400
+
+        body = request.get_json(silent=True) or {}
+        if "enabled" not in body:
+            return jsonify({"ok": False, "error": "enabled is required"}), 400
+
+        enabled = bool(body["enabled"])
+        result = enable_login_item() if enabled else disable_login_item()
+        if "macOS only" in result:
+            return jsonify({"ok": False, "error": result, "enabled": False}), 400
+        if result.lower().startswith("could not"):
+            return jsonify({"ok": False, "error": result, "enabled": is_login_item_enabled()}), 500
+
+        return jsonify({
+            "ok": True,
+            "enabled": is_login_item_enabled(),
+            "result": result,
+        })
+
+    @app.route("/api/music/now-playing")
+    def api_music_now_playing():  # noqa: ANN202
+        import platform
+
+        from tools.music import get_now_playing
+
+        supported = platform.system() in ("Darwin", "Windows")
+        macos = platform.system() == "Darwin"
+        return jsonify({
+            "supported": supported,
+            "macos": macos,
+            "now_playing": get_now_playing(),
+        })
+
     # -- Tools: list + run directly from the dashboard ---------------------
     @app.route("/api/tools")
     def api_tools():  # noqa: ANN202
         from tools.registry import (
             AUTO_ALLOW_TOOLS,
             CONFIRM_REQUIRED_TOOLS,
+            MODERATE_TOOLS,
             READ_ONLY_TOOLS,
             TOOL_DEFINITIONS,
         )
@@ -223,6 +287,8 @@ def create_app() -> Flask:
         def tier(name: str) -> str:
             if name in CONFIRM_REQUIRED_TOOLS:
                 return "high"
+            if name in MODERATE_TOOLS:
+                return "moderate"
             if name in READ_ONLY_TOOLS:
                 return "read"
             if name in AUTO_ALLOW_TOOLS:
@@ -243,7 +309,7 @@ def create_app() -> Flask:
             return jsonify({"ok": False, "error": "inputs must be an object"}), 400
 
         from dashboard.tools_run_confirm import consume, create_pending
-        from tools.registry import CONFIRM_REQUIRED_TOOLS, TOOL_DISPATCH, dispatch_tool
+        from tools.registry import CONFIRM_REQUIRED_TOOLS, MODERATE_TOOLS, TOOL_DISPATCH, dispatch_tool
 
         if name not in TOOL_DISPATCH:
             return jsonify({"ok": False, "error": f"Unknown tool: {name}"}), 404
@@ -251,7 +317,7 @@ def create_app() -> Flask:
         confirm_id = (body.get("confirm_id") or "").strip()
         confirmed = bool(body.get("confirmed"))
 
-        if name in CONFIRM_REQUIRED_TOOLS:
+        if name in CONFIRM_REQUIRED_TOOLS or name in MODERATE_TOOLS:
             if confirm_id and confirmed:
                 entry = consume(confirm_id)
                 if entry is None:
@@ -339,6 +405,88 @@ def create_app() -> Flask:
             return jsonify({"contacts": contacts})
         except Exception as exc:  # noqa: BLE001
             return jsonify({"contacts": [], "error": str(exc)})
+
+    @app.route("/api/email/unread")
+    def api_email_unread():  # noqa: ANN202
+        """Return structured unread inbox messages for the email triage view."""
+        try:
+            from tools.google_gmail import fetch_unread_emails
+
+            limit = int(request.args.get("limit") or 20)
+            emails = fetch_unread_emails(max_results=max(1, min(limit, 20)))
+            return jsonify({"ok": True, "emails": emails, "count": len(emails)})
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("email unread fetch failed", exc_info=True)
+            return jsonify({"ok": False, "emails": [], "error": str(exc)})
+
+    @app.route("/api/email/draft-reply", methods=["POST"])
+    def api_email_draft_reply():  # noqa: ANN202
+        """Draft a reply body for one unread message using Claude."""
+        body = request.get_json(silent=True) or {}
+        message_id = (body.get("message_id") or "").strip()
+        if not message_id:
+            return jsonify({"ok": False, "error": "message_id is required"}), 400
+
+        cfg = Config.load()
+        if not cfg.anthropic_api_key:
+            return jsonify({"ok": False, "error": "ANTHROPIC_API_KEY is not configured"}), 400
+
+        try:
+            from tools.google_gmail import (
+                draft_email_reply,
+                fetch_thread_context,
+                fetch_unread_emails,
+                reply_subject,
+            )
+
+            email = None
+            for item in fetch_unread_emails(max_results=20):
+                if item.get("id") == message_id:
+                    email = item
+                    break
+            if email is None:
+                return jsonify({"ok": False, "error": "Message not found in unread inbox"}), 404
+
+            thread_context = fetch_thread_context(email.get("thread_id", ""))
+            draft_body = draft_email_reply(
+                email,
+                thread_context=thread_context,
+                model=cfg.claude_model_fast,
+                api_key=cfg.anthropic_api_key,
+            )
+            return jsonify({
+                "ok": True,
+                "to": email.get("from_email") or "",
+                "subject": reply_subject(email.get("subject", "")),
+                "body": draft_body,
+                "from": email.get("from", ""),
+                "message_id": message_id,
+            })
+        except Exception as exc:  # noqa: BLE001
+            logger.error("email draft failed: %s", exc, exc_info=True)
+            return jsonify({"ok": False, "error": str(exc)}), 500
+
+    @app.route("/api/calendar/day")
+    def api_calendar_day():  # noqa: ANN202
+        """Return structured calendar events for one day."""
+        from datetime import datetime
+
+        date_str = (request.args.get("date") or "").strip()
+        if not date_str:
+            date_str = datetime.now().astimezone().date().isoformat()
+        try:
+            datetime.strptime(date_str, "%Y-%m-%d")
+        except ValueError:
+            return jsonify({"ok": False, "error": "date must be YYYY-MM-DD"}), 400
+
+        try:
+            from tools.google_calendar import fetch_calendar_day
+
+            day = fetch_calendar_day(date_str)
+            return jsonify({"ok": True, **day, "count": len(day["events"])})
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("calendar day fetch failed", exc_info=True)
+            return jsonify({"ok": False, "error": str(exc), "date": date_str, "events": []})
 
     # -- Semantic memory ----------------------------------------------------
     @app.route("/api/memory/info")

@@ -26,13 +26,17 @@ import threading
 
 from dotenv import load_dotenv
 
+from paths import bootstrap_app_paths, env_path, is_frozen, log_dir, needs_onboarding
+
+# Prepare user-data dirs and seed .env before loading config (frozen .app first launch).
+bootstrap_app_paths()
+
 # Load .env before importing anything that reads env vars
-load_dotenv()
+load_dotenv(env_path())
 
 from config import Config
 
 # Emoji-rich, single-line log output for the console (see project conventions).
-logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger("jarvis")
 
 DASHBOARD_URL = "http://127.0.0.1:7777"
@@ -124,6 +128,12 @@ def _prepare_google(cfg: Config) -> None:
 
 def _check_keys(cfg: Config) -> None:
     if not cfg.anthropic_api_key:
+        if is_frozen():
+            print()
+            print("❌  Anthropic API key missing — run Jarvis again to open the setup wizard.")
+            print(f"   Or add ANTHROPIC_API_KEY to: {env_path()}")
+            print()
+            sys.exit(1)
         print()
         print("╔════════════════════════════════════════════════════════════╗")
         print("║  ❌  ANTHROPIC_API_KEY is not set — Jarvis can't think.       ║")
@@ -155,6 +165,20 @@ def _start_dashboard() -> None:
     threading.Thread(target=run_dashboard, daemon=True, name="jarvis-dashboard").start()
 
 
+def _start_dashboard_window(cfg: Config) -> None:
+    """Open the Flask dashboard in a native PyWebView window (macOS)."""
+    if not cfg.dashboard_native_window:
+        return
+    if platform.system() != "Darwin":
+        return
+    try:
+        from dashboard.window import start_native_dashboard_window
+
+        start_native_dashboard_window()
+    except Exception as exc:  # noqa: BLE001
+        print(f"⚠️  Native dashboard window unavailable ({exc}). Use {DASHBOARD_URL}")
+
+
 def _start_hotkey(cfg: Config) -> None:
     """Register the global hotkey if enabled.  Graceful if pynput missing."""
     if not cfg.hotkey_enabled:
@@ -175,6 +199,8 @@ def _print_banner(cfg: Config) -> None:
     print("🤖 Jarvis is up.")
     print(f"   🗣️  Trigger phrase : “{trigger}”" + ("" if cfg.wake_word_enabled else "  (voice disabled)"))
     print(f"   📊 Dashboard      : {DASHBOARD_URL}")
+    if cfg.dashboard_native_window and platform.system() == "Darwin":
+        print("   🪟 Dashboard UI   : native window (PyWebView)")
     if cfg.hotkey_enabled:
         print(f"   ⌨️  Global hotkey  : {cfg.hotkey_combo}")
     print(f"   🧠 Models         : {cfg.claude_model_fast} (fast) / {cfg.claude_model_smart} (smart)")
@@ -210,6 +236,8 @@ def _run_with_ui(cfg: Config) -> None:
     # Stop button / Escape cancels the running turn and clears the queue.
     face.set_interrupt_callback(get_orchestrator().cancel_current)
     face.show_overlay()
+
+    _start_dashboard_window(cfg)
 
     stop_event = threading.Event()
     _warmup_voice(cfg)
@@ -252,6 +280,7 @@ def _run_headless(cfg: Config) -> None:
     stop_event = threading.Event()
     _warmup_voice(cfg)
     _init_automation()
+    _start_dashboard_window(cfg)
     pipeline_thread = threading.Thread(
         target=run_pipeline,
         kwargs={"cfg": cfg, "state_callback": None, "stop_event": stop_event},
@@ -269,7 +298,32 @@ def _run_headless(cfg: Config) -> None:
             _scheduler.shutdown()
 
 
+def _setup_logging() -> None:
+    handlers: list[logging.Handler] = [logging.StreamHandler()]
+    if is_frozen():
+        log_file = log_dir() / "jarvis.log"
+        handlers.append(logging.FileHandler(log_file, encoding="utf-8"))
+    logging.basicConfig(level=logging.INFO, format="%(message)s", handlers=handlers)
+
+
 def main() -> None:
+    _setup_logging()
+
+    if needs_onboarding():
+        try:
+            from onboarding import run_onboarding_wizard
+
+            if not run_onboarding_wizard():
+                print("👋 Setup cancelled.")
+                sys.exit(0)
+            load_dotenv(env_path(), override=True)
+            from config import Config as _Config
+
+            _Config.invalidate_cache()
+        except Exception as exc:  # noqa: BLE001
+            logger.error("⚠️  Onboarding failed (%s). Add keys to .env manually.", exc)
+            sys.exit(1)
+
     cfg = Config.load()
     _check_keys(cfg)
     _init_persistence()

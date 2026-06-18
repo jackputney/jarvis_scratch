@@ -106,9 +106,12 @@ function switchView(name) {
   if (name === "tools" && !_toolsLoaded) loadTools();
   if (name === "plugins") loadPluginsView();
   if (name === "contacts") loadContactsView();
+  if (name === "email") loadEmailView();
+  if (name === "calendar") loadCalendarView();
   if (name === "overview") {
     loadOverviewPlugins();
     loadDevicePanel();
+    loadMusicPanel();
   }
   document.dispatchEvent(new CustomEvent("jarvis:view", { detail: name }));
 }
@@ -274,6 +277,375 @@ async function loadContactsView() {
   }
 }
 
+function emailSkeleton() {
+  const list = $("email-list");
+  if (!list) return;
+  list.innerHTML = "";
+  for (let i = 0; i < 4; i++) {
+    const row = document.createElement("div");
+    row.className = "email-skeleton";
+    row.innerHTML =
+      `<div class="email-skeleton-lines"><span style="width:35%"></span><span style="width:55%"></span><span></span></div>`;
+    list.appendChild(row);
+  }
+}
+
+function formatEmailDate(raw) {
+  if (!raw) return "";
+  const parsed = Date.parse(raw);
+  if (Number.isNaN(parsed)) return raw;
+  return new Date(parsed).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function renderEmailRow(email) {
+  const row = document.createElement("article");
+  row.className = "email-row";
+  row.dataset.messageId = email.id || "";
+  row.innerHTML =
+    `<div class="email-row-main">` +
+    `<div class="email-row-head">` +
+    `<span class="email-from">${esc(email.from || "Unknown sender")}</span>` +
+    `<time class="email-date">${esc(formatEmailDate(email.date))}</time>` +
+    `</div>` +
+    `<div class="email-subject">${esc(email.subject || "(no subject)")}</div>` +
+    `<p class="email-snippet">${esc(email.snippet || "")}</p>` +
+    `</div>` +
+    `<div class="email-row-actions">` +
+    `<button type="button" class="ghost tiny email-draft-btn">Draft reply</button>` +
+    `</div>`;
+  row.querySelector(".email-draft-btn").addEventListener("click", () => openEmailDraft(email));
+  return row;
+}
+
+let _emailComposeConfirmId = null;
+
+function closeEmailCompose() {
+  $("email-compose-drawer")?.classList.add("hidden");
+  _emailComposeConfirmId = null;
+  const sendBtn = $("email-compose-send");
+  if (sendBtn) {
+    sendBtn.textContent = "Send";
+    sendBtn.className = "primary";
+    sendBtn.disabled = false;
+    sendBtn.onclick = sendComposedEmail;
+  }
+}
+
+function openEmailCompose(prefill) {
+  $("email-compose-to").value = prefill.to || "";
+  $("email-compose-subject-input").value = prefill.subject || "";
+  $("email-compose-body").value = prefill.body || "";
+  $("email-compose-subject").textContent = prefill.subject || "Reply";
+  $("email-compose-drawer")?.classList.remove("hidden");
+  $("email-compose-body")?.focus();
+}
+
+async function openEmailDraft(email) {
+  const btn = document.querySelector(`.email-row[data-message-id="${CSS.escape(email.id)}"] .email-draft-btn`);
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Drafting…";
+  }
+  try {
+    const data = await sendJSON("/api/email/draft-reply", "POST", { message_id: email.id });
+    if (!data.ok) {
+      showToast(data.error || "Could not draft reply", "err", 5000);
+      return;
+    }
+    openEmailCompose({
+      to: data.to || email.from_email || "",
+      subject: data.subject || "",
+      body: data.body || "",
+    });
+  } catch {
+    showToast("Draft failed (network)", "err");
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "Draft reply";
+    }
+  }
+}
+
+async function sendComposedEmail() {
+  const to = $("email-compose-to")?.value.trim();
+  const subject = $("email-compose-subject-input")?.value.trim();
+  const body = $("email-compose-body")?.value.trim();
+  if (!to || !subject || !body) {
+    showToast("To, subject, and message are required", "err");
+    return;
+  }
+
+  const inputs = { to, subject, body };
+  const sendBtn = $("email-compose-send");
+  sendBtn.disabled = true;
+  sendBtn.textContent = "Sending…";
+
+  try {
+    let res = await sendJSON("/api/tools/run", "POST", {
+      name: "send_email",
+      inputs,
+      confirm_id: _emailComposeConfirmId || undefined,
+      confirmed: Boolean(_emailComposeConfirmId),
+    });
+
+    if (res.confirm_required) {
+      _emailComposeConfirmId = res.confirm_id;
+      sendBtn.textContent = "Confirm send";
+      sendBtn.className = "danger";
+      sendBtn.disabled = false;
+      showToast("Confirm to send this email", "info", 5000);
+      return;
+    }
+
+    if (res.ok) {
+      showToast(res.result || "Email sent.", "ok", 4000);
+      closeEmailCompose();
+      await loadEmailView();
+    } else {
+      showToast(res.error || res.result || "Send failed", "err", 5000);
+    }
+  } catch {
+    showToast("Send failed (network)", "err");
+  } finally {
+    if (!_emailComposeConfirmId) {
+      sendBtn.textContent = "Send";
+      sendBtn.className = "primary";
+      sendBtn.disabled = false;
+    }
+  }
+}
+
+async function loadEmailView() {
+  const list = $("email-list");
+  const countEl = $("email-count");
+  if (!list) return;
+  emailSkeleton();
+  try {
+    const data = await getJSON("/api/email/unread");
+    list.innerHTML = "";
+    if (!data.ok && data.error) {
+      list.innerHTML =
+        `<p class="email-empty">Could not load unread email.</p>` +
+        `<p class="email-empty sub">${esc(data.error)}</p>` +
+        `<p class="email-empty"><a href="#" onclick="switchView('hub');return false;">Connect Google in Hub → Connections</a></p>`;
+      if (countEl) countEl.textContent = "—";
+      return;
+    }
+    const emails = data.emails || [];
+    if (countEl) countEl.textContent = emails.length ? `${emails.length} unread` : "Inbox clear";
+    if (!emails.length) {
+      list.innerHTML = `<p class="email-empty">No unread emails. Nice work.</p>`;
+      return;
+    }
+    emails.forEach((email) => list.appendChild(renderEmailRow(email)));
+  } catch {
+    list.innerHTML = `<p class="email-empty">Could not load email. Try a hard refresh (⌘⇧R).</p>`;
+    if (countEl) countEl.textContent = "—";
+  }
+}
+
+$("email-refresh")?.addEventListener("click", () => loadEmailView());
+$("email-compose-close")?.addEventListener("click", closeEmailCompose);
+$("email-compose-cancel")?.addEventListener("click", closeEmailCompose);
+$("email-compose-scrim")?.addEventListener("click", closeEmailCompose);
+$("email-compose-send")?.addEventListener("click", sendComposedEmail);
+
+const CALENDAR_HOUR_PX = 48;
+const CALENDAR_PX_PER_MIN = CALENDAR_HOUR_PX / 60;
+const CALENDAR_MIN_EVENT_PX = 40;
+let _calendarDay = null;
+
+function todayIsoDate() {
+  const now = new Date();
+  const tzOffset = now.getTimezoneOffset() * 60000;
+  return new Date(now.getTime() - tzOffset).toISOString().slice(0, 10);
+}
+
+function shiftIsoDate(isoDate, deltaDays) {
+  const [y, m, d] = isoDate.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + deltaDays));
+  return dt.toISOString().slice(0, 10);
+}
+
+function calendarSkeleton() {
+  const timeline = $("calendar-timeline");
+  if (!timeline) return;
+  timeline.innerHTML = "";
+  timeline.style.height = `${3 * CALENDAR_HOUR_PX}px`;
+  timeline.style.minHeight = "0";
+  for (let i = 0; i < 3; i++) {
+    const row = document.createElement("div");
+    row.className = "calendar-skeleton";
+    row.innerHTML = `<span></span><span></span><span style="width:70%"></span>`;
+    timeline.appendChild(row);
+  }
+}
+
+function setTimelineHeight(timeline, minStart, maxEnd) {
+  const spanMinutes = maxEnd - minStart;
+  const px = Math.round(spanMinutes * CALENDAR_PX_PER_MIN);
+  timeline.style.height = `${px}px`;
+  timeline.style.minHeight = "0";
+}
+
+function renderCalendarHourMarkers(timeline, minStart, maxEnd) {
+  const firstHour = Math.floor(minStart / 60);
+  const lastHour = Math.floor(maxEnd / 60);
+  for (let hour = firstHour; hour <= lastHour; hour++) {
+    const marker = document.createElement("div");
+    marker.className = "calendar-hour-marker";
+    marker.style.top = `${Math.round((hour * 60 - minStart) * CALENDAR_PX_PER_MIN)}px`;
+    const label = new Date(2000, 0, 1, hour, 0).toLocaleTimeString(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+    marker.innerHTML = `<span>${esc(label)}</span>`;
+    timeline.appendChild(marker);
+  }
+}
+
+function renderCalendarEmptyRange(timeline, message) {
+  const minStart = 9 * 60;
+  const maxEnd = 17 * 60;
+  setTimelineHeight(timeline, minStart, maxEnd);
+  renderCalendarHourMarkers(timeline, minStart, maxEnd);
+  if (message) {
+    const note = document.createElement("p");
+    note.className = "calendar-empty calendar-empty-inline";
+    note.textContent = message;
+    timeline.appendChild(note);
+  }
+}
+
+function renderCalendarEventCard(event) {
+  const card = document.createElement("article");
+  card.className = "calendar-event-card";
+  card.setAttribute("role", "listitem");
+  const timeRange = event.end_time_label
+    ? `${event.time_label} – ${event.end_time_label}`
+    : event.time_label;
+  const locationHtml = event.location
+    ? `<div class="calendar-event-location"><i class="ti ti-map-pin" aria-hidden="true"></i>${esc(event.location)}</div>`
+    : "";
+  const zoomHtml = event.zoom_link
+    ? `<a class="calendar-zoom-link" href="${esc(event.zoom_link)}">Join Zoom</a>`
+    : "";
+  card.innerHTML =
+    `<div class="calendar-event-time">${esc(timeRange)}</div>` +
+    `<div class="calendar-event-title">${esc(event.title)}</div>` +
+    (locationHtml || zoomHtml
+      ? `<div class="calendar-event-meta">${locationHtml}${zoomHtml}</div>`
+      : "");
+  return card;
+}
+
+function renderCalendarTimeline(events) {
+  const alldayEl = $("calendar-allday");
+  const timeline = $("calendar-timeline");
+  if (!timeline || !alldayEl) return;
+
+  const allDay = events.filter((e) => e.all_day);
+  const timed = events.filter((e) => !e.all_day);
+
+  if (allDay.length) {
+    alldayEl.classList.remove("hidden");
+    alldayEl.innerHTML =
+      `<div class="calendar-allday-label">All day</div>` +
+      `<div class="calendar-allday-items">` +
+      allDay
+        .map(
+          (ev) =>
+            `<div class="calendar-allday-item">` +
+            `<span class="calendar-event-title">${esc(ev.title)}</span>` +
+            (ev.location ? `<span class="calendar-event-location">${esc(ev.location)}</span>` : "") +
+            (ev.zoom_link
+              ? `<a class="calendar-zoom-link" href="${esc(ev.zoom_link)}">Join Zoom</a>`
+              : "") +
+            `</div>`
+        )
+        .join("") +
+      `</div>`;
+  } else {
+    alldayEl.classList.add("hidden");
+    alldayEl.innerHTML = "";
+  }
+
+  timeline.innerHTML = "";
+  if (!timed.length) {
+    renderCalendarEmptyRange(
+      timeline,
+      allDay.length ? "No timed events." : "Nothing scheduled for this day."
+    );
+    return;
+  }
+
+  const starts = timed.map((e) => e.timeline_start ?? 0);
+  const ends = timed.map((e) => (e.timeline_start ?? 0) + (e.duration_minutes ?? 30));
+  const minStart = Math.max(0, Math.min(...starts) - 60);
+  const maxEnd = Math.min(24 * 60, Math.max(...ends) + 60);
+  setTimelineHeight(timeline, minStart, maxEnd);
+
+  renderCalendarHourMarkers(timeline, minStart, maxEnd);
+
+  timed.forEach((event) => {
+    const block = document.createElement("div");
+    block.className = "calendar-event-block";
+    const startMin = event.timeline_start ?? minStart;
+    const duration = event.duration_minutes ?? 30;
+    block.style.top = `${Math.round((startMin - minStart) * CALENDAR_PX_PER_MIN)}px`;
+    block.style.height = `${Math.max(
+      CALENDAR_MIN_EVENT_PX,
+      Math.round(duration * CALENDAR_PX_PER_MIN)
+    )}px`;
+    block.appendChild(renderCalendarEventCard(event));
+    timeline.appendChild(block);
+  });
+}
+
+async function loadCalendarView(isoDate) {
+  if (isoDate) _calendarDay = isoDate;
+  if (!_calendarDay) _calendarDay = todayIsoDate();
+
+  const titleEl = $("calendar-day-title");
+  const subtitleEl = $("calendar-day-subtitle");
+  calendarSkeleton();
+
+  try {
+    const data = await getJSON(`/api/calendar/day?date=${encodeURIComponent(_calendarDay)}`);
+    if (!data.ok && data.error) {
+      $("calendar-timeline").innerHTML =
+        `<p class="calendar-empty">Could not load calendar.</p>` +
+        `<p class="calendar-empty sub">${esc(data.error)}</p>` +
+        `<p class="calendar-empty"><a href="#" onclick="switchView('hub');return false;">Connect Google in Hub → Connections</a></p>`;
+      $("calendar-allday")?.classList.add("hidden");
+      if (titleEl) titleEl.textContent = _calendarDay;
+      if (subtitleEl) subtitleEl.textContent = "";
+      return;
+    }
+
+    if (titleEl) titleEl.textContent = data.label || _calendarDay;
+    if (subtitleEl) {
+      subtitleEl.textContent =
+        data.count === 1 ? "1 event" : data.count ? `${data.count} events` : "No events";
+    }
+    renderCalendarTimeline(data.events || []);
+  } catch {
+    $("calendar-timeline").innerHTML =
+      `<p class="calendar-empty">Could not load calendar. Try a hard refresh (⌘⇧R).</p>`;
+    $("calendar-allday")?.classList.add("hidden");
+  }
+}
+
+$("calendar-prev")?.addEventListener("click", () => loadCalendarView(shiftIsoDate(_calendarDay || todayIsoDate(), -1)));
+$("calendar-next")?.addEventListener("click", () => loadCalendarView(shiftIsoDate(_calendarDay || todayIsoDate(), 1)));
+$("calendar-today")?.addEventListener("click", () => loadCalendarView(todayIsoDate()));
+
 async function loadOverviewPlugins() {
   const list = $("overview-plugins-list");
   if (!list) return;
@@ -336,6 +708,61 @@ function loadDevicePanel() {
     });
     grid.appendChild(btn);
   });
+}
+
+const MUSIC_CONTROLS = [
+  { label: "Previous", icon: "ti-player-skip-back", tool: "music_previous", inputs: {} },
+  { label: "Play", icon: "ti-player-play", tool: "music_play", inputs: {} },
+  { label: "Pause", icon: "ti-player-pause", tool: "music_pause", inputs: {} },
+  { label: "Next", icon: "ti-player-skip-forward", tool: "music_skip", inputs: {} },
+];
+
+async function refreshNowPlaying() {
+  const el = $("music-now-playing");
+  if (!el) return;
+  try {
+    const data = await getJSON("/api/music/now-playing");
+    if (!data.supported) {
+      $("music-panel")?.classList.add("hidden");
+      return;
+    }
+    $("music-panel")?.classList.remove("hidden");
+    el.textContent = data.now_playing || "Not playing.";
+  } catch {
+    el.textContent = "Could not read now playing.";
+  }
+}
+
+async function runMusicControl(toolName, inputs) {
+  try {
+    const data = await sendJSON("/api/tools/run", "POST", { name: toolName, inputs });
+    const msg = data.result || data.error || (data.ok ? "Done." : "Failed.");
+    showToast(msg, data.ok ? "ok" : "err", data.ok ? 2800 : 5000);
+    await refreshNowPlaying();
+    return data;
+  } catch {
+    showToast("Music control failed (network)", "err");
+    return null;
+  }
+}
+
+function loadMusicPanel() {
+  const grid = $("music-control-grid");
+  if (!grid) return;
+  grid.innerHTML = "";
+  MUSIC_CONTROLS.forEach((ctrl) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "music-btn";
+    btn.innerHTML = `<i class="ti ${ctrl.icon}" aria-hidden="true"></i><span>${esc(ctrl.label)}</span>`;
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      await runMusicControl(ctrl.tool, ctrl.inputs);
+      btn.disabled = false;
+    });
+    grid.appendChild(btn);
+  });
+  refreshNowPlaying();
 }
 
 async function loadPluginsView() {
@@ -706,6 +1133,44 @@ async function loadConfig() {
   $("set-memory-root").value = c.memory_root_path || "";
   $("set-memory-learn").checked = c.memory_auto_learn !== false;
   $("set-memory-recall").checked = c.memory_semantic_recall !== false;
+  await loadLoginItemToggle();
+}
+
+async function loadLoginItemToggle() {
+  const row = $("login-item-row");
+  const toggle = $("set-login-item");
+  if (!row || !toggle) return;
+  try {
+    const data = await getJSON("/api/login-item");
+    if (!data.supported) {
+      row.classList.add("hidden");
+      return;
+    }
+    row.classList.remove("hidden");
+    toggle.checked = !!data.enabled;
+    toggle.disabled = false;
+  } catch {
+    row.classList.add("hidden");
+  }
+}
+
+async function setLoginItem(enabled) {
+  const toggle = $("set-login-item");
+  toggle.disabled = true;
+  try {
+    const data = await sendJSON("/api/login-item", "POST", { enabled });
+    toggle.checked = !!data.enabled;
+    showToast(data.result || (enabled ? "Launch at login enabled" : "Launch at login disabled"), "ok");
+  } catch (err) {
+    toggle.checked = !enabled;
+    showToast(err.message || "Could not update launch at login", "err");
+  } finally {
+    toggle.disabled = false;
+  }
+}
+
+if ($("set-login-item")) {
+  $("set-login-item").onchange = (e) => setLoginItem(e.target.checked);
 }
 
 $("save-budget").onclick = async () => {
@@ -986,6 +1451,6 @@ document.addEventListener("keydown", (e) => {
 (async function init() {
   ensureActivityEmpty();
   await loadConfig();
-  await Promise.all([loadVars(), loadNotes(), loadMemoryInfo(), loadMetrics(), loadOverviewPlugins(), loadDevicePanel(), refresh()]);
+  await Promise.all([loadVars(), loadNotes(), loadMemoryInfo(), loadMetrics(), loadOverviewPlugins(), loadDevicePanel(), loadMusicPanel(), refresh()]);
   connectEvents();
 })();

@@ -40,6 +40,12 @@
         <button type="button" class="nav-item" data-view="contacts">
           <i class="ti ti-address-book nav-ico" aria-hidden="true"></i><span>Contacts</span>
         </button>
+        <button type="button" class="nav-item" data-view="email">
+          <i class="ti ti-mail nav-ico" aria-hidden="true"></i><span>Email</span>
+        </button>
+        <button type="button" class="nav-item" data-view="calendar">
+          <i class="ti ti-calendar nav-ico" aria-hidden="true"></i><span>Calendar</span>
+        </button>
         <button type="button" class="nav-item" data-view="plugins">
           <i class="ti ti-puzzle nav-ico" aria-hidden="true"></i><span>Plugins</span>
         </button>
@@ -119,6 +125,15 @@
               <span class="panel-sub">quick actions</span>
             </div>
             <div class="device-grid" id="device-control-grid"></div>
+          </section>
+
+          <section class="panel music-panel" id="music-panel">
+            <div class="panel-head">
+              <h2>Music</h2>
+              <span class="panel-sub">now playing</span>
+            </div>
+            <p class="music-now" id="music-now-playing">—</p>
+            <div class="music-controls" id="music-control-grid"></div>
           </section>
         </div>
       </section>
@@ -236,6 +251,46 @@
         </div>
       </section>
 
+      <!-- Email triage -->
+      <section id="view-email" class="view" data-view="email">
+        <header class="view-header">
+          <h1>Email</h1>
+          <p class="sub">Unread Gmail — draft replies and send with confirmation</p>
+        </header>
+        <div class="panel wide email-panel">
+          <div class="email-toolbar">
+            <span class="email-count" id="email-count">—</span>
+            <button type="button" class="ghost tiny" id="email-refresh">Refresh</button>
+          </div>
+          <div id="email-list" class="email-list" role="list"></div>
+        </div>
+      </section>
+
+      <!-- Calendar day view -->
+      <section id="view-calendar" class="view" data-view="calendar">
+        <header class="view-header">
+          <h1>Calendar</h1>
+          <p class="sub">Your day at a glance — times, locations, and Zoom links</p>
+        </header>
+        <div class="panel wide calendar-panel">
+          <div class="calendar-toolbar">
+            <button type="button" class="icon-btn calendar-nav-btn" id="calendar-prev" aria-label="Previous day">
+              <i class="ti ti-chevron-left" aria-hidden="true"></i>
+            </button>
+            <div class="calendar-day-label">
+              <strong id="calendar-day-title">—</strong>
+              <span class="sub" id="calendar-day-subtitle"></span>
+            </div>
+            <button type="button" class="icon-btn calendar-nav-btn" id="calendar-next" aria-label="Next day">
+              <i class="ti ti-chevron-right" aria-hidden="true"></i>
+            </button>
+            <button type="button" class="ghost tiny" id="calendar-today">Today</button>
+          </div>
+          <div id="calendar-allday" class="calendar-allday hidden"></div>
+          <div id="calendar-timeline" class="calendar-timeline" role="list"></div>
+        </div>
+      </section>
+
       <!-- Plugins -->
       <section id="view-plugins" class="view" data-view="plugins">
         <header class="view-header">
@@ -324,6 +379,7 @@
               <label>Memory folder <input type="text" id="set-memory-root" placeholder="~/JarvisMemory" /></label>
               <label class="toggle"><input type="checkbox" id="set-memory-learn" /> <span>Auto-learn from conversations</span></label>
               <label class="toggle"><input type="checkbox" id="set-memory-recall" /> <span>Semantic recall in prompts</span></label>
+              <label class="toggle hidden" id="login-item-row"><input type="checkbox" id="set-login-item" /> <span>Launch Jarvis at login</span></label>
             </div>
             <button type="button" id="save-settings">Save settings</button>
           </div>
@@ -380,6 +436,29 @@
       <div class="drawer-result hidden" id="drawer-result">
         <div class="result-head"><span id="result-status"></span><button type="button" class="ghost tiny" id="result-copy">Copy</button></div>
         <pre id="result-body"></pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- Email compose drawer -->
+  <div id="email-compose-drawer" class="drawer hidden" role="dialog" aria-modal="true" aria-labelledby="email-compose-title">
+    <div class="drawer-scrim" id="email-compose-scrim"></div>
+    <div class="drawer-panel">
+      <div class="drawer-head">
+        <div>
+          <h2 id="email-compose-title">Reply</h2>
+          <p class="drawer-desc" id="email-compose-subject">—</p>
+        </div>
+        <button type="button" class="icon-btn" id="email-compose-close" aria-label="Close"><i class="ti ti-x"></i></button>
+      </div>
+      <form class="drawer-form email-compose-form" id="email-compose-form" autocomplete="off">
+        <label>To <input type="email" id="email-compose-to" required /></label>
+        <label>Subject <input type="text" id="email-compose-subject-input" required /></label>
+        <label>Message <textarea id="email-compose-body" rows="12" required></textarea></label>
+      </form>
+      <div class="drawer-actions">
+        <button type="button" class="ghost" id="email-compose-cancel">Cancel</button>
+        <button type="button" class="primary" id="email-compose-send">Send</button>
       </div>
     </div>
   </div>

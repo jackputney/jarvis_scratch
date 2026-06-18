@@ -12,8 +12,11 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-CONFIG_PATH = Path(__file__).parent / "config.json"
-_ENV_PATH = Path(__file__).parent / ".env"
+from paths import config_path as _paths_config_path
+from paths import env_path as _paths_env_path
+
+CONFIG_PATH = _paths_config_path()
+_ENV_PATH = _paths_env_path()
 
 _cached_config: "Config | None" = None
 _cached_mtime: float = -1.0
@@ -50,6 +53,7 @@ _PERSISTED_FIELDS = (
     "barge_in_enabled",
     "hotkey_enabled",
     "hotkey_combo",
+    "dashboard_native_window",
     "memory_inject_last_n_notes",
     "memory_root_path",
     "memory_auto_learn",
@@ -90,6 +94,7 @@ class Config:
     barge_in_enabled: bool = True  # say the wake word during a reply to cut it off and ask again
     hotkey_enabled: bool = True  # register a global keyboard shortcut to wake Jarvis
     hotkey_combo: str = "<ctrl>+<shift>+<space>"  # pynput format: <ctrl>/<shift>/<alt>/<cmd> + key
+    dashboard_native_window: bool = True  # open dashboard in PyWebView on macOS (Flask still on :7777)
     memory_inject_last_n_notes: int = 5
     memory_root_path: str = ""
     memory_auto_learn: bool = True
@@ -141,6 +146,9 @@ class Config:
             wake_word=data.get("wake_word", cls.wake_word),
             wake_word_enabled=data.get("wake_word_enabled", cls.wake_word_enabled),
             barge_in_enabled=data.get("barge_in_enabled", cls.barge_in_enabled),
+            hotkey_enabled=data.get("hotkey_enabled", cls.hotkey_enabled),
+            hotkey_combo=data.get("hotkey_combo", cls.hotkey_combo),
+            dashboard_native_window=data.get("dashboard_native_window", cls.dashboard_native_window),
             memory_inject_last_n_notes=data.get(
                 "memory_inject_last_n_notes", cls.memory_inject_last_n_notes
             ),

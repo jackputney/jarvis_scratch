@@ -22,13 +22,16 @@ from hub.registry import (
     load_integrations,
 )
 
+from paths import bundled_plugins_dir, env_path, user_data_root, user_plugins_dir
+
 logger = logging.getLogger("jarvis.hub")
 
 hub_bp = Blueprint("hub", __name__)
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-ENV_PATH = PROJECT_ROOT / ".env"
-PLUGINS_DIR = PROJECT_ROOT / "plugins"
+PROJECT_ROOT = user_data_root()
+ENV_PATH = env_path()
+PLUGINS_DIR = user_plugins_dir()
+BUNDLED_PLUGINS_DIR = bundled_plugins_dir()
 
 from plugins.manifest import validate_manifest
 
@@ -94,15 +97,26 @@ def _orchestrator_snapshot() -> dict[str, Any]:
         return {"queue_depth": 0, "current_job": None}
 
 
+def _iter_plugin_dirs() -> list[Path]:
+    dirs: list[Path] = []
+    if BUNDLED_PLUGINS_DIR.is_dir():
+        dirs.append(BUNDLED_PLUGINS_DIR)
+    if PLUGINS_DIR.is_dir() and PLUGINS_DIR.resolve() != BUNDLED_PLUGINS_DIR.resolve():
+        dirs.append(PLUGINS_DIR)
+    return dirs
+
+
 def _plugin_counts() -> dict[str, int]:
     total = 0
     active = 0
-    if PLUGINS_DIR.is_dir():
-        for entry in PLUGINS_DIR.iterdir():
-            if not entry.is_dir() or entry.name.startswith("."):
+    seen: set[str] = set()
+    for base in _iter_plugin_dirs():
+        for entry in base.iterdir():
+            if not entry.is_dir() or entry.name.startswith(".") or entry.name in seen:
                 continue
             if not (entry / "manifest.json").is_file():
                 continue
+            seen.add(entry.name)
             total += 1
             if not (entry / ".disabled").is_file():
                 active += 1
@@ -110,27 +124,32 @@ def _plugin_counts() -> dict[str, int]:
 
 
 def list_plugin_manifests() -> list[dict[str, Any]]:
-    """Return every plugin under plugins/*/manifest.json."""
+    """Return every plugin under bundled and user plugin directories."""
     results: list[dict[str, Any]] = []
-    if not PLUGINS_DIR.is_dir():
-        return results
-    for entry in sorted(PLUGINS_DIR.iterdir()):
-        if not entry.is_dir() or entry.name.startswith("."):
-            continue
-        manifest_path = entry / "manifest.json"
-        if not manifest_path.is_file():
-            continue
-        try:
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        except Exception:  # noqa: BLE001
-            manifest = {"name": entry.name, "description": "(invalid manifest)"}
-        results.append({
-            "slug": entry.name,
-            "path": str(manifest_path.relative_to(PROJECT_ROOT)),
-            "enabled": not (entry / ".disabled").is_file(),
-            "manifest": manifest,
-        })
-    return results
+    seen: set[str] = set()
+    for base in reversed(_iter_plugin_dirs()):  # user dir last so it wins slug collisions
+        for entry in sorted(base.iterdir()):
+            if not entry.is_dir() or entry.name.startswith(".") or entry.name in seen:
+                continue
+            manifest_path = entry / "manifest.json"
+            if not manifest_path.is_file():
+                continue
+            seen.add(entry.name)
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            except Exception:  # noqa: BLE001
+                manifest = {"name": entry.name, "description": "(invalid manifest)"}
+            try:
+                rel = str(manifest_path.relative_to(PROJECT_ROOT))
+            except ValueError:
+                rel = str(manifest_path)
+            results.append({
+                "slug": entry.name,
+                "path": rel,
+                "enabled": not (entry / ".disabled").is_file(),
+                "manifest": manifest,
+            })
+    return sorted(results, key=lambda item: item["slug"])
 
 
 @hub_bp.route("/api/hub/integrations")

@@ -19,6 +19,7 @@ MAX_RESULTS = 5
 SNIPPET_CHARS = 200
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_FROM_EMAIL_RE = re.compile(r"<([^>]+@[^>]+)>")
 
 # Marketing emails pad snippets with zero-width spacer characters — strip them.
 _ZERO_WIDTH_CHARS = "".join(chr(c) for c in (0x200B, 0x200C, 0x200D, 0xFEFF, 0x034F))
@@ -39,22 +40,88 @@ def _clean_snippet(snippet: str) -> str:
     return _MULTI_SPACE_RE.sub(" ", cleaned).strip()
 
 
+def _extract_email(from_header: str) -> str:
+    raw = (from_header or "").strip()
+    match = _FROM_EMAIL_RE.search(raw)
+    if match:
+        return match.group(1).strip()
+    if _EMAIL_RE.match(raw):
+        return raw
+    return ""
+
+
+def reply_subject(subject: str) -> str:
+    s = (subject or "").strip()
+    if not s:
+        return "Re:"
+    if s.lower().startswith("re:"):
+        return s
+    return f"Re: {s}"
+
+
+def _fetch_message_summary(service, msg_ref: dict) -> dict:
+    full = service.users().messages().get(
+        userId="me",
+        id=msg_ref["id"],
+        format="metadata",
+        metadataHeaders=["From", "Subject", "Date"],
+    ).execute()
+    headers = {h["name"]: h["value"] for h in full.get("payload", {}).get("headers", [])}
+    from_raw = headers.get("From", "?")
+    return {
+        "id": msg_ref["id"],
+        "thread_id": full.get("threadId", ""),
+        "from": from_raw,
+        "from_email": _extract_email(from_raw),
+        "subject": headers.get("Subject", "(no subject)"),
+        "date": headers.get("Date", ""),
+        "snippet": _clean_snippet(full.get("snippet", ""))[:SNIPPET_CHARS],
+    }
+
+
 def _summarize_messages(service, messages: list[dict]) -> str:
     lines = []
     for msg in messages:
-        full = service.users().messages().get(
+        item = _fetch_message_summary(service, msg)
+        lines.append(
+            f"From: {item['from']} | Subject: {item['subject']} | {item['date']}\n  {item['snippet']}"
+        )
+    return "\n".join(lines)
+
+
+def fetch_unread_emails(max_results: int = MAX_RESULTS) -> list[dict]:
+    """Return structured unread inbox messages for the dashboard."""
+    limit = max(1, min(int(max_results), 20))
+    service = _service()
+    resp = service.users().messages().list(
+        userId="me", q="is:unread in:inbox", maxResults=limit,
+    ).execute()
+    messages = resp.get("messages", [])
+    return [_fetch_message_summary(service, msg) for msg in messages]
+
+
+def fetch_thread_context(thread_id: str, max_messages: int = 4) -> str:
+    """Return a short metadata summary of recent messages in a thread."""
+    thread_id = (thread_id or "").strip()
+    if not thread_id:
+        return ""
+    service = _service()
+    try:
+        thread = service.users().threads().get(
             userId="me",
-            id=msg["id"],
+            id=thread_id,
             format="metadata",
             metadataHeaders=["From", "Subject", "Date"],
         ).execute()
-        headers = {h["name"]: h["value"] for h in full.get("payload", {}).get("headers", [])}
-        snippet = _clean_snippet(full.get("snippet", ""))[:SNIPPET_CHARS]
-        lines.append(
-            f"From: {headers.get('From', '?')} | Subject: {headers.get('Subject', '(no subject)')} "
-            f"| {headers.get('Date', '')}\n  {snippet}"
+    except Exception:  # noqa: BLE001
+        return ""
+    chunks: list[str] = []
+    for msg in thread.get("messages", [])[-max(1, min(int(max_messages), 8)):]:
+        item = _fetch_message_summary(service, msg)
+        chunks.append(
+            f"From: {item['from']}\nSubject: {item['subject']}\nDate: {item['date']}\n{item['snippet']}"
         )
-    return "\n".join(lines)
+    return "\n\n---\n\n".join(chunks)
 
 
 def list_recent_emails(max_results: int = MAX_RESULTS) -> str:
@@ -72,16 +139,15 @@ def list_recent_emails(max_results: int = MAX_RESULTS) -> str:
 
 def get_unread_emails(max_results: int = MAX_RESULTS) -> str:
     """Return summaries of unread inbox messages."""
-    limit = max(1, min(int(max_results), 20))
-    service = _service()
-    resp = service.users().messages().list(
-        userId="me", q="is:unread in:inbox", maxResults=limit,
-    ).execute()
-    messages = resp.get("messages", [])
-    if not messages:
+    items = fetch_unread_emails(max_results=max_results)
+    if not items:
         return "No unread emails in your inbox."
-    header = f"Unread emails ({len(messages)}):"
-    return header + "\n" + _summarize_messages(service, messages)
+    header = f"Unread emails ({len(items)}):"
+    lines = [
+        f"From: {item['from']} | Subject: {item['subject']} | {item['date']}\n  {item['snippet']}"
+        for item in items
+    ]
+    return header + "\n" + "\n".join(lines)
 
 
 def search_emails(query: str, max_results: int = MAX_RESULTS) -> str:
@@ -98,6 +164,51 @@ def search_emails(query: str, max_results: int = MAX_RESULTS) -> str:
     if not messages:
         return f"No emails found for query: {query!r}"
     return _summarize_messages(service, messages)
+
+
+_DRAFT_REPLY_SYSTEM = (
+    "You draft concise, helpful email replies for the user's assistant dashboard. "
+    "Write only the email body plain text: no subject line, no markdown, no placeholders "
+    "like [Your name]. Keep the tone natural and professional. "
+    "Match the language of the incoming email when it is obvious."
+)
+
+
+def draft_email_reply(
+    email: dict,
+    *,
+    thread_context: str = "",
+    model: str,
+    api_key: str,
+) -> str:
+    """Use Claude to draft a reply body for one inbox message."""
+    import anthropic
+
+    context_block = ""
+    if thread_context.strip():
+        context_block = f"\n\nEarlier messages in this thread:\n{thread_context.strip()}"
+
+    user_prompt = (
+        f"Draft a reply to this email:\n\n"
+        f"From: {email.get('from', '?')}\n"
+        f"Date: {email.get('date', '')}\n"
+        f"Subject: {email.get('subject', '(no subject)')}\n\n"
+        f"{email.get('snippet', '').strip()}"
+        f"{context_block}"
+    )
+
+    client = anthropic.Anthropic(api_key=api_key)
+    response = client.messages.create(
+        model=model,
+        max_tokens=800,
+        system=_DRAFT_REPLY_SYSTEM,
+        messages=[{"role": "user", "content": user_prompt}],
+    )
+    parts = [block.text for block in response.content if getattr(block, "type", None) == "text"]
+    body = "".join(parts).strip()
+    if not body:
+        raise ValueError("Claude returned an empty draft")
+    return body
 
 
 def send_email(to: str, subject: str, body: str) -> str:
