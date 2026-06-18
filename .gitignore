@@ -38,6 +38,7 @@ env/
 .DS_Store
 .AppleDouble
 .LSOverride
+.onboarding_complete
 
 # IDEs
 .idea/
