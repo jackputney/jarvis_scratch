@@ -116,12 +116,12 @@ class Config:
     wake_word_enabled: bool = True
     wakeword_threshold: float = 0.5
     barge_in_enabled: bool = True  # say the wake word during a reply to cut it off and ask again
-    barge_in_threshold: float = 0.5
-    barge_in_hits: int = 2
+    barge_in_threshold: float = 0.42
+    barge_in_hits: int = 1
     followup_listen_sec: int = 5
-    followup_vad_silence_ms: int = 900
-    followup_vad_min_capture_ms: int = 500
-    tts_trailing_silence_ms: int = 100
+    followup_vad_silence_ms: int = 600
+    followup_vad_min_capture_ms: int = 350
+    tts_trailing_silence_ms: int = 80
     hotkey_enabled: bool = True  # register a global keyboard shortcut to wake Jarvis
     hotkey_combo: str = "<ctrl>+<shift>+<space>"  # pynput format: <ctrl>/<shift>/<alt>/<cmd> + key
     dashboard_native_window: bool = True  # open dashboard in PyWebView on macOS (Flask still on :7777)

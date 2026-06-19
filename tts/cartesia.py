@@ -48,9 +48,10 @@ FRAME_BYTES = SAMPLE_WIDTH * CHANNELS  # one mono sample = 2 bytes
 WRITE_FRAMES = 2048
 WRITE_BYTES = WRITE_FRAMES * FRAME_BYTES
 
-# Hold ~120 ms of audio before the first write so the output buffer never underruns.
-PREBUFFER_BYTES = int(SAMPLE_RATE * SAMPLE_WIDTH * 0.12)
-DEFAULT_TRAILING_SILENCE_MS = 150
+# Hold ~70 ms before the first write — enough to avoid underruns while staying near
+# Cartesia's ~150 ms end-to-end first-audio target (network latency + playback).
+PREBUFFER_BYTES = int(SAMPLE_RATE * SAMPLE_WIDTH * 0.07)
+DEFAULT_TRAILING_SILENCE_MS = 80
 
 # Set by stop_speech(); checked during playback so the user can interrupt mid-utterance.
 _cancel = threading.Event()

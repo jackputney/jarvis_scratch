@@ -77,7 +77,7 @@ _hotwords_cache: dict[str, Any] = {"ts": 0.0, "value": ""}
 # helper returns early and closes the socket, which halts generation (and billing)
 # rather than letting the request finish in the background. See _create_claude_message.
 _claude_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="jarvis-claude")
-_QUEUE_POLL_SEC = 0.25
+_QUEUE_POLL_SEC = 0.05
 CLAUDE_HTTP_TIMEOUT_SEC = 30.0
 # Upper bound a voice turn can occupy the orchestrator (query + tool confirm wait
 # + TTS). Generous: the confirm gate alone can hold for confirm_timeout_sec.
@@ -375,7 +375,8 @@ def _audio_loop(
     logger.info("👂 Wake word listener active — say '%s' to activate", wake_word)
 
     was_inactive = False
-    barge_energy = ENERGY_VAD_THRESHOLD
+    audio_cfg = Config.load()
+    audio_cfg_ts = time.monotonic()
     try:
         while not audio_stop.is_set():
             data = _read_audio_frame(stream, use_sounddevice=use_sounddevice)
@@ -386,7 +387,11 @@ def _audio_loop(
                 continue
 
             pipeline_state = events.get_state().get("pipeline_state", "IDLE")
-            cfg = Config.load()
+            now = time.monotonic()
+            if now - audio_cfg_ts >= 2.0:
+                audio_cfg = Config.load()
+                audio_cfg_ts = now
+            cfg = audio_cfg
 
             # VAD barge-in: user talks over Jarvis during SPEAKING (after grace arms).
             if (
@@ -419,7 +424,7 @@ def _audio_loop(
 
             audio_int16 = np.frombuffer(data, dtype=np.int16)
             oww_model.predict(audio_int16)
-            threshold = cfg.wakeword_threshold
+            threshold = audio_cfg.wakeword_threshold
             hits = WAKE_CONSECUTIVE_HITS
             for name, scores in oww_model.prediction_buffer.items():
                 if len(scores) < hits:
@@ -654,7 +659,8 @@ def _capture_and_transcribe(
 ) -> str | None:
     """Record one utterance and transcribe it. Returns None if nothing was heard."""
     transition(set_state, SpeechPhase.LISTENING, reason="capture")
-    if not skip_drain:
+    # Skip drain when wake/barge-in already queued opening frames.
+    if not skip_drain and not capturing.is_set():
         _drain_queue(capture_queue)
     capturing.set()
     audio_bytes = _record_from_queue(
@@ -736,7 +742,7 @@ class _SentenceEmitter:
     """Split streamed text deltas into speakable sentence chunks."""
 
     _BOUNDARY = re.compile(r"[.!?…\n]")
-    _SOFT_CAP = 180
+    _SOFT_CAP = 120
 
     def __init__(self, emit: Callable[[str], None]) -> None:
         self._emit = emit
@@ -858,7 +864,7 @@ def _call_claude(
             if _interrupt.is_set():
                 logger.info("⏹️  Stop during Claude — abandoning in-flight request.")
                 return "", model, total_cost, stream_spoken
-            time.sleep(0.25)
+            time.sleep(0.05)
 
         try:
             response = future.result()
@@ -1242,7 +1248,6 @@ def run_pipeline(
                         _answer_wait_frames(cfg) if awaiting_answer else _followup_wait_frames(cfg)
                     )
                     _reset_audio_for_followup(wake_event, capture_queue, capturing, paused)
-                    time.sleep(0.15)
                     transition(
                         set_state,
                         SpeechPhase.FOLLOWUP_WINDOW,
