@@ -77,17 +77,44 @@ function showToast(message, kind = "info", ms = 3200) {
 window.jarvisToast = showToast;
 
 // ---- Activity feed ----------------------------------------------------
-function addActivity(icon, text) {
+function formatRelativeTime(ts) {
+  const then = typeof ts === "number" ? ts : new Date(ts).getTime();
+  const ms = Date.now() - then;
+  if (ms < 15000) return "just now";
+  const sec = Math.floor(ms / 1000);
+  if (sec < 60) return `${sec} sec ago`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min} min ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr} hr ago`;
+  return new Date(then).toLocaleDateString();
+}
+
+function refreshActivityTimestamps() {
+  document.querySelectorAll(".feed-time[data-ts]").forEach((el) => {
+    el.textContent = formatRelativeTime(Number(el.dataset.ts));
+  });
+}
+
+function renderEmptyState(container, iconClass, message) {
+  if (!container) return;
+  container.innerHTML =
+    `<div class="view-empty-state">` +
+    `<i class="ti ${iconClass}" aria-hidden="true"></i>` +
+    `<p>${esc(message)}</p></div>`;
+}
+
+function addActivity(icon, text, ts = Date.now()) {
   const feed = $("activity-feed");
-  const empty = feed.querySelector(".empty");
+  const empty = feed.querySelector(".empty, .view-empty-state");
   if (empty) empty.remove();
   const entry = document.createElement("div");
   entry.className = "feed-entry";
-  const t = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  entry.dataset.ts = String(ts);
   entry.innerHTML =
     `<span class="feed-ico">${icon}</span>` +
     `<span class="feed-text">${esc(text)}</span>` +
-    `<span class="feed-time">${t}</span>`;
+    `<span class="feed-time" data-ts="${ts}">${formatRelativeTime(ts)}</span>`;
   feed.prepend(entry);
   while (feed.children.length > 30) feed.lastChild.remove();
 }
@@ -95,7 +122,11 @@ function addActivity(icon, text) {
 function ensureActivityEmpty() {
   const feed = $("activity-feed");
   if (!feed.children.length) {
-    feed.innerHTML = `<div class="feed-entry empty">Waiting for activity…</div>`;
+    renderEmptyState(
+      feed,
+      "ti-microphone",
+      "No activity yet. Try saying hey Jarvis."
+    );
   }
 }
 
@@ -264,9 +295,11 @@ async function loadContactsView() {
       return;
     }
     if (!contacts.length) {
-      list.innerHTML =
-        `<p class="contacts-empty">No contacts found.</p>` +
-        `<p class="contacts-empty sub"><a href="#" onclick="switchView('hub');return false;">Connect Google in Hub → Connections</a></p>`;
+      renderEmptyState(
+        list,
+        "ti-address-book",
+        "No contacts found. Make sure Google OAuth is connected in Hub."
+      );
       return;
     }
     contacts.forEach((c) => list.appendChild(renderContactCard(c)));
@@ -440,7 +473,7 @@ async function loadEmailView() {
     const emails = data.emails || [];
     if (countEl) countEl.textContent = emails.length ? `${emails.length} unread` : "Inbox clear";
     if (!emails.length) {
-      list.innerHTML = `<p class="email-empty">No unread emails. Nice work.</p>`;
+      renderEmptyState(list, "ti-mail", "No unread emails. You're all caught up.");
       return;
     }
     emails.forEach((email) => list.appendChild(renderEmailRow(email)));
@@ -680,6 +713,20 @@ const DEVICE_CONTROLS = [
   { label: "WiFi off", icon: "ti-wifi-off", tool: "set_wifi", inputs: { action: "off" } },
 ];
 
+async function withLoadingButton(btn, fn) {
+  if (!btn || btn.dataset.loading === "1") return null;
+  btn.dataset.loading = "1";
+  btn.disabled = true;
+  btn.classList.add("is-loading");
+  try {
+    return await fn();
+  } finally {
+    btn.dataset.loading = "0";
+    btn.disabled = false;
+    btn.classList.remove("is-loading");
+  }
+}
+
 async function runDeviceControl(toolName, inputs) {
   try {
     const data = await sendJSON("/api/tools/run", "POST", { name: toolName, inputs });
@@ -701,11 +748,8 @@ function loadDevicePanel() {
     btn.type = "button";
     btn.className = "device-btn";
     btn.innerHTML = `<i class="ti ${ctrl.icon}" aria-hidden="true"></i><span>${esc(ctrl.label)}</span>`;
-    btn.addEventListener("click", async () => {
-      btn.disabled = true;
-      await runDeviceControl(ctrl.tool, ctrl.inputs);
-      btn.disabled = false;
-    });
+    btn.dataset.quickAction = "1";
+    btn.addEventListener("click", () => withLoadingButton(btn, () => runDeviceControl(ctrl.tool, ctrl.inputs)));
     grid.appendChild(btn);
   });
 }
@@ -755,11 +799,8 @@ function loadMusicPanel() {
     btn.type = "button";
     btn.className = "music-btn";
     btn.innerHTML = `<i class="ti ${ctrl.icon}" aria-hidden="true"></i><span>${esc(ctrl.label)}</span>`;
-    btn.addEventListener("click", async () => {
-      btn.disabled = true;
-      await runMusicControl(ctrl.tool, ctrl.inputs);
-      btn.disabled = false;
-    });
+    btn.dataset.quickAction = "1";
+    btn.addEventListener("click", () => withLoadingButton(btn, () => runMusicControl(ctrl.tool, ctrl.inputs)));
     grid.appendChild(btn);
   });
   refreshNowPlaying();
@@ -903,7 +944,16 @@ function renderState(s) {
     )
     .join("");
   const activityBody = $("activity-log-body");
-  if (activityBody) activityBody.innerHTML = rows;
+  if (activityBody) {
+    if (!s.conversations.length) {
+      activityBody.innerHTML =
+        `<tr><td colspan="5"><div class="view-empty-state">` +
+        `<i class="ti ti-activity" aria-hidden="true"></i>` +
+        `<p>No activity yet. Try saying hey Jarvis.</p></div></td></tr>`;
+    } else {
+      activityBody.innerHTML = rows;
+    }
+  }
   $("log-count").textContent = `${s.conversations.length} exchanges`;
 }
 
@@ -934,17 +984,22 @@ let _activeTool = null;
 async function loadTools() {
   try {
     const { tools } = await getJSON("/api/tools");
-    _tools = tools;
+    _tools = tools || [];
     _toolsLoaded = true;
     renderTools();
   } catch {
     showToast("Could not load tools", "err");
+    renderEmptyState($("tools-gallery"), "ti-tool", "No tools loaded.");
   }
 }
 
 function renderTools() {
   const gallery = $("tools-gallery");
   gallery.innerHTML = "";
+  if (!_tools.length) {
+    renderEmptyState(gallery, "ti-tool", "No tools loaded.");
+    return;
+  }
   const list = _tools.filter((t) => _toolFilter === "all" || t.tier === _toolFilter);
   list.forEach((tool) => {
     const [icon, cat] = TOOL_META[tool.name] || ["🔧", "Tool"];
@@ -959,7 +1014,9 @@ function renderTools() {
     card.onclick = () => openDrawer(tool);
     gallery.appendChild(card);
   });
-  if (!list.length) gallery.innerHTML = `<p class="sub">No tools in this category.</p>`;
+  if (!list.length) {
+    renderEmptyState(gallery, "ti-filter", "No tools in this category.");
+  }
 }
 
 $$(".tools-filter .pill").forEach((p) => {
@@ -1141,6 +1198,7 @@ async function loadConfig() {
   if ($("set-followup-sec")) $("set-followup-sec").value = c.followup_listen_sec ?? 5;
   await loadLoginItemToggle();
   await loadVoicePicker(c);
+  wireSettingsAutoSave();
 }
 
 const VOICE_PREVIEW_TEXT = "Hello, I'm Jarvis. How can I help you today?";
@@ -1203,7 +1261,7 @@ async function loadVoicePicker(cfg) {
     grid.querySelectorAll(".voice-card").forEach((el) => el.classList.remove("selected"));
     card.classList.add("selected");
     await sendJSON("/api/config", "POST", { elevenlabs_voice_id: voiceId });
-    showToast("Voice saved", "ok");
+    flashSettingSaved(card);
   };
 }
 
@@ -1211,7 +1269,7 @@ document.querySelectorAll('input[name="tts-provider"]').forEach((el) => {
   el.addEventListener("change", async (e) => {
     if (!e.target.checked) return;
     await sendJSON("/api/config", "POST", { tts_provider: e.target.value });
-    showToast(`TTS provider: ${e.target.value}`, "ok");
+    flashSettingSaved(e.target.closest(".provider-opt"));
   });
 });
 
@@ -1252,12 +1310,67 @@ if ($("set-login-item")) {
   $("set-login-item").onchange = (e) => setLoginItem(e.target.checked);
 }
 
+function flashSettingSaved(el) {
+  const target = el?.closest?.("label") || el?.closest?.(".budget-edit") || el;
+  if (!target) return;
+  target.classList.remove("setting-saved-flash");
+  void target.offsetWidth;
+  target.classList.add("setting-saved-flash");
+  setTimeout(() => target.classList.remove("setting-saved-flash"), 1000);
+}
+
+let _configSaveTimer = null;
+function queueConfigSave(changes, el) {
+  clearTimeout(_configSaveTimer);
+  _configSaveTimer = setTimeout(async () => {
+    try {
+      await sendJSON("/api/config", "POST", changes);
+      flashSettingSaved(el);
+    } catch {
+      showToast("Could not save setting", "err");
+    }
+  }, 280);
+}
+
+function wireSettingsAutoSave() {
+  const bindings = [
+    { id: "set-wake-enabled", key: "wake_word_enabled", type: "checkbox" },
+    { id: "set-confirm", key: "confirm_before_execute", type: "checkbox" },
+    { id: "set-whisper", key: "whisper_model", type: "text" },
+    { id: "set-fast", key: "claude_model_fast", type: "text" },
+    { id: "set-smart", key: "claude_model_smart", type: "text" },
+    { id: "set-threshold", key: "routing_word_threshold", type: "number" },
+    { id: "set-wakeword", key: "wake_word", type: "text" },
+    { id: "set-memory-root", key: "memory_root_path", type: "text" },
+    { id: "set-memory-learn", key: "memory_auto_learn", type: "checkbox" },
+    { id: "set-memory-recall", key: "memory_semantic_recall", type: "checkbox" },
+    { id: "set-wakeword-threshold", key: "wakeword_threshold", type: "number" },
+    { id: "set-barge-in", key: "barge_in_enabled", type: "checkbox" },
+    { id: "set-barge-threshold", key: "barge_in_threshold", type: "number" },
+    { id: "set-barge-hits", key: "barge_in_hits", type: "number" },
+    { id: "set-vad-silence", key: "vad_silence_ms", type: "number" },
+    { id: "set-vad-min", key: "vad_min_capture_ms", type: "number" },
+    { id: "set-followup-sec", key: "followup_listen_sec", type: "number" },
+    { id: "daily-budget", key: "daily_budget_usd", type: "number" },
+    { id: "monthly-budget", key: "monthly_budget_usd", type: "number" },
+  ];
+  bindings.forEach(({ id, key, type }) => {
+    const el = $(id);
+    if (!el || el.dataset.configWired) return;
+    el.dataset.configWired = "1";
+    el.addEventListener("change", () => {
+      const val = type === "checkbox" ? el.checked : el.value;
+      queueConfigSave({ [key]: val }, el);
+    });
+  });
+}
+
 $("save-budget").onclick = async () => {
   await sendJSON("/api/config", "POST", {
     daily_budget_usd: $("daily-budget").value,
     monthly_budget_usd: $("monthly-budget").value,
   });
-  showToast("Budgets saved", "ok");
+  flashSettingSaved($("save-budget"));
   refresh();
 };
 
@@ -1282,7 +1395,7 @@ $("save-settings").onclick = async () => {
     vad_min_capture_ms: $("set-vad-min")?.value,
     followup_listen_sec: $("set-followup-sec")?.value,
   });
-  showToast("Settings saved — applied live", "ok");
+  flashSettingSaved($("save-settings"));
 };
 
 // ---- Command dock -----------------------------------------------------
@@ -1364,6 +1477,15 @@ async function loadNotes() {
   const { notes } = await getJSON("/api/notes");
   const list = $("notes-list");
   list.innerHTML = "";
+  if (!notes.length) {
+    renderEmptyState(
+      list,
+      "ti-note",
+      "No notes yet. Say 'note:' followed by anything to save your first note."
+    );
+    $("notes-count").textContent = "0 notes";
+    return;
+  }
   notes.forEach((title) => {
     const li = document.createElement("li");
     const span = document.createElement("span");
@@ -1447,6 +1569,7 @@ async function refresh() {
   } catch {
     /* transient */
   }
+  refreshActivityTimestamps();
 }
 
 // ---- SSE --------------------------------------------------------------
@@ -1467,10 +1590,12 @@ function handleSSE(data) {
       break;
     case "job.transcript":
       if (data.heard) addActivity("💬", `${data.heard} → ${(data.reply || "").slice(0, 60)}`);
+      refreshActivityTimestamps();
       refresh();
       break;
     case "tool.run":
       addActivity(data.ok ? "🛠️" : "⚠️", `${data.name} (voice) ${data.ok ? "ran" : "failed"}`);
+      refreshActivityTimestamps();
       loadMetrics();
       break;
     case "confirm.pending":
@@ -1539,4 +1664,5 @@ document.addEventListener("keydown", (e) => {
   await loadConfig();
   await Promise.all([loadVars(), loadNotes(), loadMemoryInfo(), loadMetrics(), loadOverviewPlugins(), loadDevicePanel(), loadMusicPanel(), refresh()]);
   connectEvents();
+  setInterval(refreshActivityTimestamps, 30000);
 })();

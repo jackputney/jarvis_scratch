@@ -53,7 +53,17 @@ function openConnectionsFor(id) {
 }
 
 async function loadIntegrations() {
-  _integrations = await hubGet("/api/hub/integrations");
+  const [integrations, status] = await Promise.all([
+    hubGet("/api/hub/integrations"),
+    hubGet("/api/hub/status"),
+  ]);
+  const statusById = {};
+  (status.services || []).forEach((s) => { statusById[s.id] = s; });
+  _integrations = integrations.map((item) => ({
+    ...item,
+    ...(statusById[item.id] || {}),
+    connected: statusById[item.id]?.connected ?? item.connected,
+  }));
   renderSetupGrid();
   renderConnections();
 }
@@ -70,7 +80,7 @@ function renderSetupGrid() {
     const badge = comingSoon ? `<span class="soon-badge">Coming soon</span>` : "";
     card.innerHTML =
       `<div class="hub-int-top"><i class="${hubEsc(item.icon || "ti-plug")}"></i>` +
-      `<span class="status-dot ${item.connected ? "on" : "off"}"></span>${badge}</div>` +
+      `<span class="status-dot ${item.connected ? "on" : "off"}" title="${item.connected ? "Key set" : "Key missing"}"></span>${badge}</div>` +
       `<div class="hub-int-name">${hubEsc(item.name)}</div>` +
       `<div class="hub-int-desc">${hubEsc(item.description)}</div>` +
       `<div class="hub-int-label">${hubEsc(item.label || (comingSoon ? "Coming soon" : (item.connected ? "Connected" : "Not connected")))}</div>`;
@@ -124,7 +134,9 @@ function renderConnections() {
     section.innerHTML =
       `<div class="hub-conn-head">` +
       `<i class="${hubEsc(item.icon || "ti-plug")}"></i>` +
-      `<div><h3>${hubEsc(item.name)}</h3><span class="conn-badge ${item.connected ? "on" : "off"}">${hubEsc(item.label)}</span></div>` +
+      `<div><h3>${hubEsc(item.name)}</h3>` +
+      `<span class="status-dot ${item.connected ? "on" : "off"}" title="${item.connected ? "Key set" : "Key missing"}"></span> ` +
+      `<span class="conn-badge ${item.connected ? "on" : "off"}">${hubEsc(item.connected ? "Connected" : "Not connected")}</span></div>` +
       `</div>${body}`;
     list.appendChild(section);
   });
@@ -252,6 +264,11 @@ async function refreshHealth() {
     `<p>Today: <strong>$${Number(sp.today || 0).toFixed(2)}</strong></p>` +
     `<p>Month: <strong>$${Number(sp.month || 0).toFixed(2)}</strong></p>` +
     `<p>Remaining: <strong>$${Number(sp.remaining || 0).toFixed(2)}</strong></p>`;
+  const checked = hub$("hub-last-checked");
+  if (checked) {
+    const t = new Date();
+    checked.textContent = `Last checked: ${t.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+  }
 }
 
 function startHealthPoll() {

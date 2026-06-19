@@ -154,6 +154,8 @@ body::before {
 .status-dot.waiting_confirm { background: var(--warn); box-shadow: 0 0 10px rgba(251, 191, 36, 0.5); }
 .status-dot.speaking { background: var(--accent-bright); box-shadow: 0 0 10px var(--accent-glow); }
 .status-dot.capped { background: var(--danger); }
+.status-dot.on { background: var(--good); box-shadow: 0 0 8px rgba(52, 211, 153, 0.45); }
+.status-dot.off { background: var(--danger); box-shadow: 0 0 6px rgba(248, 113, 113, 0.35); }
 
 .sidebar-nav {
   display: flex;
@@ -447,6 +449,39 @@ body::before {
 .feed-entry .feed-text { flex: 1; min-width: 0; word-break: break-word; }
 .feed-entry .feed-time { margin-left: auto; color: var(--muted); font-size: 11px; font-family: var(--font-mono); white-space: nowrap; }
 .feed-entry.empty { justify-content: center; color: var(--muted); font-style: italic; border-style: dashed; }
+
+.view-empty-state {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px; padding: 32px 20px; text-align: center; color: var(--muted);
+}
+.view-empty-state i { font-size: 28px; opacity: 0.45; }
+.view-empty-state p { margin: 0; font-size: 13px; line-height: 1.5; max-width: 320px; }
+
+.device-btn.is-loading,
+.music-btn.is-loading,
+[data-loading="1"] {
+  opacity: 0.72; cursor: wait; position: relative;
+}
+.device-btn.is-loading span,
+.music-btn.is-loading span { opacity: 0.5; }
+.device-btn.is-loading::after,
+.music-btn.is-loading::after {
+  content: ""; position: absolute; right: 10px; top: 50%; margin-top: -7px;
+  width: 14px; height: 14px; border: 2px solid var(--stroke);
+  border-top-color: var(--accent); border-radius: 50%;
+  animation: btn-spin 0.7s linear infinite;
+}
+@keyframes btn-spin { to { transform: rotate(360deg); } }
+
+.setting-saved-flash {
+  animation: setting-flash 1s ease;
+}
+@keyframes setting-flash {
+  0%, 100% { box-shadow: none; }
+  20%, 80% { box-shadow: inset 0 0 0 1px rgba(52, 211, 153, 0.55); background: rgba(52, 211, 153, 0.08); border-radius: var(--radius-sm); }
+}
+
+.hub-last-checked { font-size: 11px; color: var(--muted); margin-top: 8px; }
 
 /* ---- Command dock ---- */
 .command-dock {
