@@ -1129,7 +1129,6 @@ async function loadConfig() {
   $("set-smart").value = c.claude_model_smart;
   $("set-threshold").value = c.routing_word_threshold;
   $("set-wakeword").value = c.wake_word;
-  $("set-voice").value = c.cartesia_voice_id;
   $("set-memory-root").value = c.memory_root_path || "";
   $("set-memory-learn").checked = c.memory_auto_learn !== false;
   $("set-memory-recall").checked = c.memory_semantic_recall !== false;
@@ -1141,7 +1140,80 @@ async function loadConfig() {
   if ($("set-vad-min")) $("set-vad-min").value = c.vad_min_capture_ms ?? 2500;
   if ($("set-followup-sec")) $("set-followup-sec").value = c.followup_listen_sec ?? 5;
   await loadLoginItemToggle();
+  await loadVoicePicker(c);
 }
+
+const VOICE_PREVIEW_TEXT = "Hello, I'm Jarvis. How can I help you today?";
+
+async function loadVoicePicker(cfg) {
+  const grid = $("voice-picker-grid");
+  if (!grid) return;
+
+  let data;
+  try {
+    data = await getJSON("/api/tts/voices");
+  } catch {
+    grid.innerHTML = "<p class=\"sub\">Could not load voices.</p>";
+    return;
+  }
+
+  const selected = cfg?.elevenlabs_voice_id || data.selected;
+  const provider = cfg?.tts_provider || data.provider || "elevenlabs";
+  document.querySelectorAll('input[name="tts-provider"]').forEach((el) => {
+    el.checked = el.value === provider;
+  });
+
+  grid.innerHTML = "";
+  for (const voice of data.voices || []) {
+    const card = document.createElement("div");
+    card.className = `voice-card${voice.id === selected ? " selected" : ""}`;
+    card.dataset.voiceId = voice.id;
+    card.innerHTML = `
+      <div class="voice-card-head">
+        <span class="voice-card-name">${voice.name}</span>
+        <span class="voice-gender-tag">${voice.gender}</span>
+      </div>
+      <button type="button" class="voice-preview-btn" data-voice-id="${voice.id}">Preview</button>
+    `;
+    grid.appendChild(card);
+  }
+
+  grid.onclick = async (e) => {
+    const previewBtn = e.target.closest(".voice-preview-btn");
+    if (previewBtn) {
+      e.stopPropagation();
+      previewBtn.disabled = true;
+      try {
+        await sendJSON("/api/tts/preview", "POST", {
+          voice_id: previewBtn.dataset.voiceId,
+          text: VOICE_PREVIEW_TEXT,
+        });
+        showToast("Playing preview…", "info");
+      } catch (err) {
+        showToast(err.message || "Preview failed", "err");
+      } finally {
+        previewBtn.disabled = false;
+      }
+      return;
+    }
+
+    const card = e.target.closest(".voice-card");
+    if (!card?.dataset.voiceId) return;
+    const voiceId = card.dataset.voiceId;
+    grid.querySelectorAll(".voice-card").forEach((el) => el.classList.remove("selected"));
+    card.classList.add("selected");
+    await sendJSON("/api/config", "POST", { elevenlabs_voice_id: voiceId });
+    showToast("Voice saved", "ok");
+  };
+}
+
+document.querySelectorAll('input[name="tts-provider"]').forEach((el) => {
+  el.addEventListener("change", async (e) => {
+    if (!e.target.checked) return;
+    await sendJSON("/api/config", "POST", { tts_provider: e.target.value });
+    showToast(`TTS provider: ${e.target.value}`, "ok");
+  });
+});
 
 async function loadLoginItemToggle() {
   const row = $("login-item-row");
@@ -1198,7 +1270,7 @@ $("save-settings").onclick = async () => {
     claude_model_smart: $("set-smart").value,
     routing_word_threshold: $("set-threshold").value,
     wake_word: $("set-wakeword").value,
-    cartesia_voice_id: $("set-voice").value,
+    tts_provider: document.querySelector('input[name="tts-provider"]:checked')?.value,
     memory_root_path: $("set-memory-root").value.trim(),
     memory_auto_learn: $("set-memory-learn").checked,
     memory_semantic_recall: $("set-memory-recall").checked,

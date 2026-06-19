@@ -182,12 +182,11 @@ class Orchestrator:
                         yield item
 
                 def _run_stream_tts() -> None:
-                    from tts.cartesia import speak_stream
+                    from tts.router import speak_stream
 
-                    voice_id = getattr(cfg, "cartesia_voice_id", None)
                     speak_stream(
                         _sentence_iter(),
-                        voice_id=voice_id or "a0e99841-438c-4a64-b679-ae501e7d6091",
+                        voice_id=None,
                         on_first_chunk=lambda: self._set_state("SPEAKING"),
                     )
 
@@ -250,7 +249,7 @@ class Orchestrator:
             if tts_thread is not None:
                 while tts_thread.is_alive():
                     if self._interrupt_set():
-                        from tts.cartesia import stop_speech
+                        from tts.router import stop_speech
 
                         stop_speech()
                         break
@@ -311,12 +310,8 @@ class Orchestrator:
     def _do_speak(self, text: str, cfg: Any) -> None:
         if self._speak is None:
             return
-        voice_id = getattr(cfg, "cartesia_voice_id", None)
         try:
-            if voice_id:
-                self._speak(text, voice_id=voice_id)
-            else:
-                self._speak(text)
+            self._speak(text)
         except Exception:  # noqa: BLE001
             logger.error("⚠️  TTS failed.", exc_info=True)
 

@@ -375,11 +375,22 @@
               <label>Fast model <input type="text" id="set-fast" /></label>
               <label>Smart model <input type="text" id="set-smart" /></label>
               <label>Wake word <input type="text" id="set-wakeword" /></label>
-              <label>TTS voice id <input type="text" id="set-voice" /></label>
               <label>Memory folder <input type="text" id="set-memory-root" placeholder="~/JarvisMemory" /></label>
               <label class="toggle"><input type="checkbox" id="set-memory-learn" /> <span>Auto-learn from conversations</span></label>
               <label class="toggle"><input type="checkbox" id="set-memory-recall" /> <span>Semantic recall in prompts</span></label>
               <label class="toggle hidden" id="login-item-row"><input type="checkbox" id="set-login-item" /> <span>Launch Jarvis at login</span></label>
+            </div>
+            <div class="panel-head voice-section-head"><h2>Voice</h2></div>
+            <div class="voice-section">
+              <div class="tts-provider-row">
+                <span class="field-label">TTS provider</span>
+                <div class="tts-provider-toggle" role="radiogroup" aria-label="TTS provider">
+                  <label class="provider-opt"><input type="radio" name="tts-provider" value="elevenlabs" /> ElevenLabs</label>
+                  <label class="provider-opt"><input type="radio" name="tts-provider" value="cartesia" /> Cartesia</label>
+                  <label class="provider-opt"><input type="radio" name="tts-provider" value="pyttsx3" /> Local (pyttsx3)</label>
+                </div>
+              </div>
+              <div id="voice-picker-grid" class="voice-picker-grid" aria-label="ElevenLabs voice picker"></div>
             </div>
             <div class="panel-head voice-tuning-head"><h2>Voice tuning</h2></div>
             <div class="settings-grid">

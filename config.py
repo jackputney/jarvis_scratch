@@ -45,7 +45,10 @@ _PERSISTED_FIELDS = (
     "stt_backend",
     "stt_model",
     "streaming_tts",
+    "tts_provider",
     "cartesia_voice_id",
+    "elevenlabs_voice_id",
+    "elevenlabs_model_id",
     "confirm_before_execute",
     "ui_enabled",
     "wake_word",
@@ -79,6 +82,14 @@ _PERSISTED_FIELDS = (
 )
 
 
+ELEVENLABS_VOICES: list[dict[str, str]] = [
+    {"id": "JBFqnCBsd6RMkjVDRZzb", "name": "George", "gender": "male"},
+    {"id": "TX3LPaxmHKxFdv7VOQHJ", "name": "Liam", "gender": "male"},
+    {"id": "EXAVITQu4vr4xnSDxMaL", "name": "Sarah", "gender": "female"},
+    {"id": "XB0fDUnXU5powFXDhCwa", "name": "Charlotte", "gender": "female"},
+]
+
+
 @dataclass
 class Config:
     llm_provider: str = "anthropic"  # anthropic | openai | gemini | auto (per-turn routing)
@@ -93,7 +104,10 @@ class Config:
     stt_backend: str = "mlx"
     stt_model: str = "tiny"
     streaming_tts: bool = True
+    tts_provider: str = "elevenlabs"  # elevenlabs | cartesia | pyttsx3
     cartesia_voice_id: str = "a0e99841-438c-4a64-b679-ae501e7d6091"
+    elevenlabs_voice_id: str = "JBFqnCBsd6RMkjVDRZzb"
+    elevenlabs_model_id: str = "eleven_flash_v2_5"
     confirm_before_execute: bool = True
     ui_enabled: bool = True
     wake_word: str = "hey_jarvis"
@@ -129,6 +143,7 @@ class Config:
     openai_api_key: str = field(default="", repr=False)
     gemini_api_key: str = field(default="", repr=False)
     cartesia_api_key: str = field(default="", repr=False)
+    elevenlabs_api_key: str = field(default="", repr=False)
     google_client_secret: str = field(default="", repr=False)
     brave_api_key: str = field(default="", repr=False)
 
@@ -154,7 +169,10 @@ class Config:
             stt_backend=data.get("stt_backend", cls.stt_backend),
             stt_model=stt_model,
             streaming_tts=data.get("streaming_tts", cls.streaming_tts),
+            tts_provider=data.get("tts_provider", cls.tts_provider),
             cartesia_voice_id=data.get("cartesia_voice_id", cls.cartesia_voice_id),
+            elevenlabs_voice_id=data.get("elevenlabs_voice_id", cls.elevenlabs_voice_id),
+            elevenlabs_model_id=data.get("elevenlabs_model_id", cls.elevenlabs_model_id),
             confirm_before_execute=data.get("confirm_before_execute", cls.confirm_before_execute),
             ui_enabled=data.get("ui_enabled", cls.ui_enabled),
             wake_word=data.get("wake_word", cls.wake_word),
@@ -201,6 +219,7 @@ class Config:
         cfg.openai_api_key = os.environ.get("OPENAI_API_KEY", "")
         cfg.gemini_api_key = os.environ.get("GEMINI_API_KEY", "")
         cfg.cartesia_api_key = os.environ.get("CARTESIA_API_KEY", "")
+        cfg.elevenlabs_api_key = os.environ.get("ELEVENLABS_API_KEY", "")
         cfg.google_client_secret = os.environ.get("GOOGLE_CLIENT_SECRET", "")
         cfg.brave_api_key = os.environ.get("BRAVE_API_KEY", "")
         env_google_id = os.environ.get("GOOGLE_CLIENT_ID", "").strip()

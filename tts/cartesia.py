@@ -374,12 +374,12 @@ def _speak_cartesia(
 # Public interface
 # ---------------------------------------------------------------------------
 
-def speak(
+def speak_cartesia(
     text: str,
     voice_id: str = "a0e99841-438c-4a64-b679-ae501e7d6091",
     on_first_chunk: Callable[[], None] | None = None,
 ) -> None:
-    """Speak text aloud. Uses Cartesia when CARTESIA_API_KEY is set, else local TTS."""
+    """Speak text via Cartesia (or local fallback when key missing)."""
     if not text or not text.strip():
         return
 
@@ -392,17 +392,12 @@ def speak(
         _speak_local(text)
 
 
-def speak_stream(
+def speak_cartesia_stream(
     text_chunks: Iterator[str],
     voice_id: str = "a0e99841-438c-4a64-b679-ae501e7d6091",
     on_first_chunk: Callable[[], None] | None = None,
 ) -> None:
-    """Speak a stream of text chunks as they arrive (sentence-boundary streaming).
-
-    Cartesia audio for each chunk feeds one continuous output stream. Falls back
-    to local TTS per chunk when CARTESIA_API_KEY is unset. Blocks until playback
-    finishes or stop_speech().
-    """
+    """Speak streaming sentence chunks via Cartesia."""
     _cancel.clear()
     api_key = os.environ.get("CARTESIA_API_KEY", "")
 
@@ -428,3 +423,25 @@ def speak_stream(
                 return
             if chunk and chunk.strip():
                 _speak_local(chunk.strip())
+
+
+def speak(
+    text: str,
+    voice_id: str = "a0e99841-438c-4a64-b679-ae501e7d6091",
+    on_first_chunk: Callable[[], None] | None = None,
+) -> None:
+    """Speak text aloud via the configured TTS router."""
+    from tts.router import speak as route_speak
+
+    route_speak(text, voice_id=voice_id, on_first_chunk=on_first_chunk)
+
+
+def speak_stream(
+    text_chunks: Iterator[str],
+    voice_id: str = "a0e99841-438c-4a64-b679-ae501e7d6091",
+    on_first_chunk: Callable[[], None] | None = None,
+) -> None:
+    """Speak a stream of text chunks via the configured TTS router."""
+    from tts.router import speak_stream as route_speak_stream
+
+    route_speak_stream(text_chunks, voice_id=voice_id, on_first_chunk=on_first_chunk)

@@ -173,7 +173,7 @@ def test_busy_result_marks_job_failed(make_orch):
 def test_voice_command_uses_streaming_tts_when_enabled(make_orch, monkeypatch):
     spoken: list[str] = []
     monkeypatch.setattr(
-        "tts.cartesia.speak_stream",
+        "tts.router.speak_stream",
         lambda chunks, **kw: spoken.extend(list(chunks)),
     )
 

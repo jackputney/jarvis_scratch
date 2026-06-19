@@ -34,6 +34,8 @@ Endpoints:
   GET  /api/email/unread     → unread Gmail summaries for the triage view
   POST /api/email/draft-reply → Claude draft for replying to one message
   GET  /api/calendar/day     → calendar events for one day (YYYY-MM-DD)
+  GET  /api/tts/voices       → ElevenLabs preset voices for the Settings picker
+  POST /api/tts/preview      → speak a short sample {voice_id, text}
 """
 
 from __future__ import annotations
@@ -218,6 +220,36 @@ def create_app() -> Flask:
         changes = request.get_json(silent=True) or {}
         cfg = Config.update_persisted(changes)
         return jsonify({"ok": True, "config": cfg.to_persisted_dict()})
+
+    @app.route("/api/tts/voices", methods=["GET"])
+    def api_tts_voices():  # noqa: ANN202
+        from config import ELEVENLABS_VOICES
+
+        cfg = Config.load()
+        return jsonify({
+            "voices": ELEVENLABS_VOICES,
+            "selected": cfg.elevenlabs_voice_id,
+            "provider": cfg.tts_provider,
+        })
+
+    @app.route("/api/tts/preview", methods=["POST"])
+    def api_tts_preview():  # noqa: ANN202
+        body = request.get_json(silent=True) or {}
+        voice_id = (body.get("voice_id") or "").strip()
+        text = (body.get("text") or "Hello, I'm Jarvis. How can I help you today?").strip()
+        if not voice_id:
+            return jsonify({"ok": False, "error": "voice_id is required"}), 400
+
+        def _run_preview() -> None:
+            try:
+                from tts.router import speak_preview
+
+                speak_preview(text, voice_id, provider="elevenlabs")
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("TTS preview failed: %s", exc, exc_info=True)
+
+        threading.Thread(target=_run_preview, daemon=True, name="jarvis-tts-preview").start()
+        return jsonify({"ok": True})
 
     @app.route("/api/login-item", methods=["GET"])
     def api_login_item_get():  # noqa: ANN202

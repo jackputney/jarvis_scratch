@@ -38,6 +38,7 @@ PyQt6_sip==13.11.1
 
 # TTS
 cartesia==3.2.0
+elevenlabs>=1.0.0
 pyttsx3==2.99
 
 # Networking (web search, Cartesia streaming)

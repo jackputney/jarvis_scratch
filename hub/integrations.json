@@ -40,6 +40,19 @@
     "docs_url": "https://aistudio.google.com/app/apikey"
   },
   {
+    "id": "elevenlabs",
+    "name": "ElevenLabs",
+    "description": "Primary voice synthesis",
+    "icon": "ti-microphone",
+    "color": "purple",
+    "auth_type": "api_key",
+    "required": false,
+    "fields": [
+      { "key": "ELEVENLABS_API_KEY", "label": "API key", "required": true, "secret": true }
+    ],
+    "docs_url": "https://elevenlabs.io/app/settings/api-keys"
+  },
+  {
     "id": "cartesia",
     "name": "Cartesia",
     "description": "Voice synthesis",

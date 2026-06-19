@@ -704,6 +704,44 @@ ul.notes li .title:hover { color: var(--accent-bright); }
 .budget-edit { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
 .budget-edit label { color: var(--muted); font-size: 12px; display: inline-flex; align-items: center; gap: 6px; }
 .voice-tuning-head { margin-top: 18px; margin-bottom: 10px; }
+.voice-section-head { margin-top: 18px; margin-bottom: 10px; }
+.voice-section { margin-bottom: 18px; }
+.tts-provider-row { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+.tts-provider-row .field-label { color: var(--muted); font-size: 12px; }
+.tts-provider-toggle { display: flex; flex-wrap: wrap; gap: 10px; }
+.provider-opt {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 12px; border-radius: var(--radius-sm);
+  border: 1px solid var(--stroke); background: var(--bg-inset);
+  color: var(--text); font-size: 13px; cursor: pointer;
+}
+.provider-opt:has(input:checked) { border-color: var(--accent); background: rgba(56, 189, 248, 0.08); }
+.provider-opt input { width: auto; margin: 0; }
+.voice-picker-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+}
+.voice-card {
+  background: var(--bg-inset); border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm); padding: 14px;
+  display: flex; flex-direction: column; gap: 8px; cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.voice-card:hover { border-color: var(--accent-dim); }
+.voice-card.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.voice-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.voice-card-name { font-weight: 600; font-size: 14px; }
+.voice-gender-tag {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em;
+  padding: 2px 7px; border-radius: 999px;
+  background: rgba(148, 163, 184, 0.15); color: var(--muted);
+}
+.voice-preview-btn {
+  align-self: flex-start; font-size: 12px; padding: 5px 10px;
+  border-radius: var(--radius-sm); border: 1px solid var(--stroke);
+  background: transparent; color: var(--accent-bright); cursor: pointer;
+}
+.voice-preview-btn:hover { border-color: var(--accent); background: rgba(56, 189, 248, 0.06); }
+.voice-preview-btn:disabled { opacity: 0.5; cursor: wait; }
 .models-meta { font-family: var(--font-mono); font-size: 12px; }
 
 /* ---- Plugins ---- */
