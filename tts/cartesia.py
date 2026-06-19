@@ -50,6 +50,7 @@ WRITE_BYTES = WRITE_FRAMES * FRAME_BYTES
 
 # Hold ~120 ms of audio before the first write so the output buffer never underruns.
 PREBUFFER_BYTES = int(SAMPLE_RATE * SAMPLE_WIDTH * 0.12)
+DEFAULT_TRAILING_SILENCE_MS = 150
 
 # Set by stop_speech(); checked during playback so the user can interrupt mid-utterance.
 _cancel = threading.Event()
@@ -141,6 +142,22 @@ def iter_aligned_writes(chunks: Iterator[bytes], write_bytes: int = WRITE_BYTES)
     tail = len(buffer) - (len(buffer) % FRAME_BYTES)
     if tail:
         yield bytes(buffer[:tail])
+
+
+def _trailing_silence_ms() -> int:
+    try:
+        from config import Config
+
+        return max(0, min(500, int(Config.load().tts_trailing_silence_ms)))
+    except Exception:  # noqa: BLE001
+        return DEFAULT_TRAILING_SILENCE_MS
+
+
+def _silence_pcm(ms: int | None = None) -> bytes:
+    duration = DEFAULT_TRAILING_SILENCE_MS if ms is None else max(0, ms)
+    nbytes = int(SAMPLE_RATE * SAMPLE_WIDTH * duration / 1000)
+    nbytes -= nbytes % FRAME_BYTES
+    return b"\x00" * nbytes
 
 
 def stop_speech() -> None:
@@ -293,6 +310,8 @@ def _iter_cartesia_audio(text: str, voice_id: str, api_key: str) -> Iterator[byt
             audio = getattr(event, "audio", None)
             if audio:
                 yield audio
+    if not _cancel.is_set():
+        yield _silence_pcm(_trailing_silence_ms())
 
 
 def _iter_cartesia_stream(
@@ -325,6 +344,8 @@ def _iter_cartesia_stream(
                 audio = getattr(event, "audio", None)
                 if audio:
                     yield audio
+        if not _cancel.is_set():
+            yield _silence_pcm(_trailing_silence_ms())
 
 
 def _speak_cartesia(

@@ -381,6 +381,16 @@
               <label class="toggle"><input type="checkbox" id="set-memory-recall" /> <span>Semantic recall in prompts</span></label>
               <label class="toggle hidden" id="login-item-row"><input type="checkbox" id="set-login-item" /> <span>Launch Jarvis at login</span></label>
             </div>
+            <div class="panel-head voice-tuning-head"><h2>Voice tuning</h2></div>
+            <div class="settings-grid">
+              <label>Wake threshold <input type="number" id="set-wakeword-threshold" min="0.1" max="0.95" step="0.05" /></label>
+              <label class="toggle"><input type="checkbox" id="set-barge-in" /> <span>Barge-in (wake word cuts reply)</span></label>
+              <label>Barge-in threshold <input type="number" id="set-barge-threshold" min="0.1" max="0.95" step="0.05" /></label>
+              <label>Barge-in hits <input type="number" id="set-barge-hits" min="1" max="5" step="1" /></label>
+              <label>VAD silence (ms) <input type="number" id="set-vad-silence" min="400" max="3000" step="100" /></label>
+              <label>VAD min capture (ms) <input type="number" id="set-vad-min" min="500" max="5000" step="100" /></label>
+              <label>Follow-up window (sec) <input type="number" id="set-followup-sec" min="2" max="15" step="1" /></label>
+            </div>
             <button type="button" id="save-settings">Save settings</button>
           </div>
           <div class="panel">

@@ -85,18 +85,15 @@ SAMPLE_WIDTH = 2
 MAX_RECORD_SECONDS = 20
 POST_SPEECH_SILENCE_FRAMES = 25  # fallback if config not passed
 WAIT_FOR_SPEECH_FRAMES = int(6000 / FRAME_DURATION_MS)
-FOLLOWUP_WAIT_FRAMES = int(6000 / FRAME_DURATION_MS)
+FOLLOWUP_WAIT_FRAMES = int(5000 / FRAME_DURATION_MS)
 ANSWER_WAIT_FRAMES = int(12000 / FRAME_DURATION_MS)
 PRE_ROLL_FRAMES = 8
-WAKE_THRESHOLD = 0.55
 WAKE_CONSECUTIVE_HITS = 2
 # Mid-reply barge-in tuning. On speakers (no echo cancellation) the mic hears
-# Jarvis's own voice, so this is a balance: sensitive enough to catch "hey jarvis"
-# said over the reply, but not so sensitive that Jarvis's own audio self-triggers.
-# A short grace period keeps detection OFF for the opening words (where residual
-# echo and the just-said wake utterance would otherwise fire a false barge).
-BARGEIN_WAKE_THRESHOLD = 0.5
-BARGEIN_CONSECUTIVE_HITS = 2
+# Jarvis's own voice, so thresholds are configurable via config.json
+# (barge_in_threshold, barge_in_hits). A short grace period keeps detection OFF
+# for the opening words (where residual echo and the just-said wake utterance
+# would otherwise fire a false barge).
 BARGEIN_GRACE_SEC = 1.5
 AUDIO_THREAD_RESTART_DELAY = 2.0
 ENERGY_VAD_THRESHOLD = 250
@@ -224,6 +221,28 @@ def _ensure_wake_model(wake_word: str) -> None:
     logger.info("✅  Wake word model ready: %s", os.path.basename(onnx_path))
 
 
+def _followup_wait_frames(cfg: Config) -> int:
+    sec = max(2, int(getattr(cfg, "followup_listen_sec", 5) or 5))
+    return int(sec * 1000 / FRAME_DURATION_MS)
+
+
+def _answer_wait_frames(cfg: Config) -> int:
+    return max(_followup_wait_frames(cfg), ANSWER_WAIT_FRAMES)
+
+
+def _reset_audio_for_followup(
+    wake_event: threading.Event,
+    capture_queue: "queue.Queue[bytes]",
+    capturing: threading.Event,
+    paused: threading.Event,
+) -> None:
+    """Clear wake/barge residue so the follow-up mic window opens reliably."""
+    wake_event.clear()
+    capturing.clear()
+    paused.clear()
+    _drain_queue(capture_queue)
+
+
 def _reset_oww(model: Any) -> None:
     try:
         for buf in model.prediction_buffer.values():
@@ -328,11 +347,12 @@ def _audio_loop(
 
             audio_int16 = np.frombuffer(data, dtype=np.int16)
             oww_model.predict(audio_int16)
+            cfg = Config.load()
             # While a reply is playing, listen for a barge-in with a much more
             # sensitive threshold so "hey jarvis" can cut Jarvis off mid-sentence.
             speaking = events.get_state().get("pipeline_state") == "SPEAKING"
-            threshold = BARGEIN_WAKE_THRESHOLD if speaking else WAKE_THRESHOLD
-            hits = BARGEIN_CONSECUTIVE_HITS if speaking else WAKE_CONSECUTIVE_HITS
+            threshold = cfg.barge_in_threshold if speaking else cfg.wakeword_threshold
+            hits = cfg.barge_in_hits if speaking else WAKE_CONSECUTIVE_HITS
             for name, scores in oww_model.prediction_buffer.items():
                 if len(scores) < hits:
                     continue
@@ -549,6 +569,8 @@ def _capture_and_transcribe(
     set_state: Callable[[str], None],
     *,
     wait_for_speech_frames: int = WAIT_FOR_SPEECH_FRAMES,
+    silence_ms: int | None = None,
+    min_capture_ms: int | None = None,
 ) -> str | None:
     """Record one utterance and transcribe it. Returns None if nothing was heard."""
     set_state("LISTENING")
@@ -557,8 +579,8 @@ def _capture_and_transcribe(
     audio_bytes = _record_from_queue(
         capture_queue,
         wait_for_speech_frames,
-        silence_ms=cfg.vad_silence_ms,
-        min_capture_ms=cfg.vad_min_capture_ms,
+        silence_ms=silence_ms if silence_ms is not None else cfg.vad_silence_ms,
+        min_capture_ms=min_capture_ms if min_capture_ms is not None else cfg.vad_min_capture_ms,
     )
 
     paused.set()
@@ -960,6 +982,7 @@ def _wait_for_job_with_bargein(
     while True:
         job = orchestrator.wait(job_id, timeout=0.1)
         if job is None or job.done_event.is_set() or time.monotonic() > deadline:
+            _reset_audio_for_followup(wake_event, capture_queue, capturing, paused)
             return job, False
         if not bargein:
             continue
@@ -1133,9 +1156,11 @@ def run_pipeline(
                         break
 
                     awaiting_answer = bool(job and job.reply and job.reply.rstrip().endswith("?"))
-                    wait_frames = ANSWER_WAIT_FRAMES if awaiting_answer else FOLLOWUP_WAIT_FRAMES
-                    time.sleep(0.4)
-                    paused.clear()
+                    wait_frames = (
+                        _answer_wait_frames(cfg) if awaiting_answer else _followup_wait_frames(cfg)
+                    )
+                    _reset_audio_for_followup(wake_event, capture_queue, capturing, paused)
+                    time.sleep(0.15)
                     logger.info(
                         "👂 %s…",
                         "Waiting for your answer" if awaiting_answer else "Listening for follow-up",
@@ -1147,10 +1172,12 @@ def run_pipeline(
                         cfg,
                         set_state,
                         wait_for_speech_frames=wait_frames,
+                        silence_ms=cfg.followup_vad_silence_ms,
+                        min_capture_ms=cfg.followup_vad_min_capture_ms,
                     )
                     if text is None and awaiting_answer and not _interrupt.is_set():
                         logger.info("👂 Still listening for your answer…")
-                        paused.clear()
+                        _reset_audio_for_followup(wake_event, capture_queue, capturing, paused)
                         text = _capture_and_transcribe(
                             capture_queue,
                             capturing,
@@ -1158,6 +1185,8 @@ def run_pipeline(
                             cfg,
                             set_state,
                             wait_for_speech_frames=wait_frames,
+                            silence_ms=cfg.followup_vad_silence_ms,
+                            min_capture_ms=cfg.followup_vad_min_capture_ms,
                         )
                     if text is None:
                         break

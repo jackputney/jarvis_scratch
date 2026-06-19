@@ -50,7 +50,14 @@ _PERSISTED_FIELDS = (
     "ui_enabled",
     "wake_word",
     "wake_word_enabled",
+    "wakeword_threshold",
     "barge_in_enabled",
+    "barge_in_threshold",
+    "barge_in_hits",
+    "followup_listen_sec",
+    "followup_vad_silence_ms",
+    "followup_vad_min_capture_ms",
+    "tts_trailing_silence_ms",
     "hotkey_enabled",
     "hotkey_combo",
     "dashboard_native_window",
@@ -91,7 +98,14 @@ class Config:
     ui_enabled: bool = True
     wake_word: str = "hey_jarvis"
     wake_word_enabled: bool = True
+    wakeword_threshold: float = 0.5
     barge_in_enabled: bool = True  # say the wake word during a reply to cut it off and ask again
+    barge_in_threshold: float = 0.5
+    barge_in_hits: int = 2
+    followup_listen_sec: int = 5
+    followup_vad_silence_ms: int = 900
+    followup_vad_min_capture_ms: int = 500
+    tts_trailing_silence_ms: int = 150
     hotkey_enabled: bool = True  # register a global keyboard shortcut to wake Jarvis
     hotkey_combo: str = "<ctrl>+<shift>+<space>"  # pynput format: <ctrl>/<shift>/<alt>/<cmd> + key
     dashboard_native_window: bool = True  # open dashboard in PyWebView on macOS (Flask still on :7777)
@@ -145,7 +159,16 @@ class Config:
             ui_enabled=data.get("ui_enabled", cls.ui_enabled),
             wake_word=data.get("wake_word", cls.wake_word),
             wake_word_enabled=data.get("wake_word_enabled", cls.wake_word_enabled),
+            wakeword_threshold=float(data.get("wakeword_threshold", cls.wakeword_threshold)),
             barge_in_enabled=data.get("barge_in_enabled", cls.barge_in_enabled),
+            barge_in_threshold=float(data.get("barge_in_threshold", cls.barge_in_threshold)),
+            barge_in_hits=int(data.get("barge_in_hits", cls.barge_in_hits)),
+            followup_listen_sec=int(data.get("followup_listen_sec", cls.followup_listen_sec)),
+            followup_vad_silence_ms=int(data.get("followup_vad_silence_ms", cls.followup_vad_silence_ms)),
+            followup_vad_min_capture_ms=int(
+                data.get("followup_vad_min_capture_ms", cls.followup_vad_min_capture_ms)
+            ),
+            tts_trailing_silence_ms=int(data.get("tts_trailing_silence_ms", cls.tts_trailing_silence_ms)),
             hotkey_enabled=data.get("hotkey_enabled", cls.hotkey_enabled),
             hotkey_combo=data.get("hotkey_combo", cls.hotkey_combo),
             dashboard_native_window=data.get("dashboard_native_window", cls.dashboard_native_window),

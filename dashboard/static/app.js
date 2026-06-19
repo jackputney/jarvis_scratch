@@ -1133,6 +1133,13 @@ async function loadConfig() {
   $("set-memory-root").value = c.memory_root_path || "";
   $("set-memory-learn").checked = c.memory_auto_learn !== false;
   $("set-memory-recall").checked = c.memory_semantic_recall !== false;
+  if ($("set-wakeword-threshold")) $("set-wakeword-threshold").value = c.wakeword_threshold ?? 0.5;
+  if ($("set-barge-in")) $("set-barge-in").checked = c.barge_in_enabled !== false;
+  if ($("set-barge-threshold")) $("set-barge-threshold").value = c.barge_in_threshold ?? 0.5;
+  if ($("set-barge-hits")) $("set-barge-hits").value = c.barge_in_hits ?? 2;
+  if ($("set-vad-silence")) $("set-vad-silence").value = c.vad_silence_ms ?? 1400;
+  if ($("set-vad-min")) $("set-vad-min").value = c.vad_min_capture_ms ?? 2500;
+  if ($("set-followup-sec")) $("set-followup-sec").value = c.followup_listen_sec ?? 5;
   await loadLoginItemToggle();
 }
 
@@ -1195,6 +1202,13 @@ $("save-settings").onclick = async () => {
     memory_root_path: $("set-memory-root").value.trim(),
     memory_auto_learn: $("set-memory-learn").checked,
     memory_semantic_recall: $("set-memory-recall").checked,
+    wakeword_threshold: $("set-wakeword-threshold")?.value,
+    barge_in_enabled: $("set-barge-in")?.checked,
+    barge_in_threshold: $("set-barge-threshold")?.value,
+    barge_in_hits: $("set-barge-hits")?.value,
+    vad_silence_ms: $("set-vad-silence")?.value,
+    vad_min_capture_ms: $("set-vad-min")?.value,
+    followup_listen_sec: $("set-followup-sec")?.value,
   });
   showToast("Settings saved — applied live", "ok");
 };
