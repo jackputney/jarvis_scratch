@@ -14,6 +14,7 @@ dashboard's request threads can read/write concurrently.
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 import threading
 import time
@@ -22,6 +23,8 @@ from datetime import datetime
 from typing import Any
 
 from memory.db import DB_PATH, connect, init_db
+
+logger = logging.getLogger("jarvis.events")
 MAX_EVENTS = 200
 
 _lock = threading.Lock()
@@ -53,7 +56,10 @@ def emit(event_type: str, **data: Any) -> None:
 
 def set_pipeline_state(state: str) -> None:
     with _lock:
+        prev = _state["pipeline_state"]
         _state["pipeline_state"] = state
+    if prev != state:
+        logger.info("STATE: %s → %s", prev, state)
     emit("state", state=state)
 
 

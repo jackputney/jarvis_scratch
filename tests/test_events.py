@@ -19,6 +19,15 @@ def test_state_snapshot_has_uptime(temp_env):
     assert isinstance(state["uptime_seconds"], int)
 
 
+def test_pipeline_state_transition_emits_structured_log(caplog):
+    import logging
+
+    events.set_pipeline_state("IDLE")
+    with caplog.at_level(logging.INFO, logger="jarvis.events"):
+        events.set_pipeline_state("LISTENING")
+    assert any("STATE: IDLE → LISTENING" in r.message for r in caplog.records)
+
+
 def test_record_conversation_persists(temp_env):
     events.record_conversation("hi", "hello", "claude-haiku-4-5", 320, 0.0012)
     rows = events.get_recent_conversations(50)

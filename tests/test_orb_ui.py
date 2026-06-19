@@ -96,3 +96,32 @@ def test_face_window_does_not_use_tool_flag():
     finally:
         widget.shutdown()
         app.processEvents()
+
+
+def test_face_set_state_cross_thread_no_typeerror():
+    """F1 — pipeline worker threads must not crash the Qt orb with TypeError."""
+    import sys
+    import threading
+
+    from PyQt6.QtWidgets import QApplication
+
+    from ui.face import FaceWidget, JarvisState
+
+    app = QApplication.instance() or QApplication(sys.argv)
+    widget = FaceWidget()
+    errors: list[BaseException] = []
+
+    def worker() -> None:
+        try:
+            for state in (JarvisState.LISTENING, JarvisState.SPEAKING, JarvisState.IDLE):
+                widget.set_state(state)
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    thread.join(timeout=5.0)
+    app.processEvents()
+    widget.shutdown()
+    app.processEvents()
+    assert not errors, errors
