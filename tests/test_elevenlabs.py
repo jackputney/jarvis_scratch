@@ -123,3 +123,41 @@ def test_preview_endpoint_requires_voice_id(client):
     resp = client.post("/api/tts/preview", json={"text": "Hello"})
     assert resp.status_code == 400
     assert resp.get_json()["ok"] is False
+
+
+def test_router_reloads_voice_after_config_change(temp_env, monkeypatch):
+    """Voice/provider changes via dashboard must apply on the next speak() without restart."""
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "test-key")
+    voices: list[str] = []
+
+    def fake_elevenlabs(text, voice_id, model_id, on_first_chunk=None):
+        voices.append(voice_id)
+
+    monkeypatch.setattr("tts.elevenlabs.speak", fake_elevenlabs)
+    Config.update_persisted({"tts_provider": "elevenlabs", "elevenlabs_voice_id": "JBFqnCBsd6RMkjVDRZzb"})
+    from tts.router import speak
+
+    speak("Hello George")
+    Config.update_persisted({"elevenlabs_voice_id": "EXAVITQu4vr4xnSDxMaL"})
+    speak("Hello Sarah")
+    assert voices == ["JBFqnCBsd6RMkjVDRZzb", "EXAVITQu4vr4xnSDxMaL"]
+
+
+def test_speak_stream_reloads_config_per_chunk(temp_env, monkeypatch):
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "test-key")
+    voices: list[str] = []
+
+    def fake_elevenlabs(text, voice_id, model_id, on_first_chunk=None):
+        voices.append(voice_id)
+
+    monkeypatch.setattr("tts.elevenlabs.speak", fake_elevenlabs)
+    Config.update_persisted({"tts_provider": "elevenlabs", "elevenlabs_voice_id": "JBFqnCBsd6RMkjVDRZzb"})
+    from tts.router import speak_stream
+
+    def chunks():
+        yield "First."
+        Config.update_persisted({"elevenlabs_voice_id": "EXAVITQu4vr4xnSDxMaL"})
+        yield "Second."
+
+    speak_stream(chunks())
+    assert voices == ["JBFqnCBsd6RMkjVDRZzb", "EXAVITQu4vr4xnSDxMaL"]

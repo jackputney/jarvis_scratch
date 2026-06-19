@@ -238,8 +238,10 @@ class Config:
         return cfg
 
     @classmethod
-    def load(cls) -> "Config":
+    def load(cls, *, fresh: bool = False) -> "Config":
         global _cached_config, _cached_mtime
+        if fresh:
+            cls.invalidate_cache()
         try:
             current_mtime = CONFIG_PATH.stat().st_mtime if CONFIG_PATH.exists() else 0.0
         except OSError:
@@ -250,6 +252,11 @@ class Config:
         _cached_config = cfg
         _cached_mtime = current_mtime
         return cfg
+
+    @classmethod
+    def load_fresh(cls) -> "Config":
+        """Re-read config.json from disk (for live TTS / dashboard hot-reload)."""
+        return cls.load(fresh=True)
 
     @classmethod
     def invalidate_cache(cls) -> None:

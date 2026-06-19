@@ -219,6 +219,13 @@ def create_app() -> Flask:
     def api_config_post():  # noqa: ANN202
         changes = request.get_json(silent=True) or {}
         cfg = Config.update_persisted(changes)
+        tts_keys = {"tts_provider", "elevenlabs_voice_id", "elevenlabs_model_id", "cartesia_voice_id"}
+        if tts_keys.intersection(changes):
+            logger.debug(
+                "🔊 TTS config updated live — provider=%s voice=%s",
+                cfg.tts_provider,
+                cfg.elevenlabs_voice_id,
+            )
         return jsonify({"ok": True, "config": cfg.to_persisted_dict()})
 
     @app.route("/api/tts/voices", methods=["GET"])

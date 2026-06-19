@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Iterator
-from typing import Any
 
 from config import Config
 from tts import cartesia, elevenlabs
@@ -14,7 +13,8 @@ logger = logging.getLogger("jarvis.tts")
 
 
 def _cfg() -> Config:
-    return Config.load()
+    """Always re-read config.json so dashboard voice/provider changes apply live."""
+    return Config.load_fresh()
 
 
 def _resolve_cartesia_voice(voice_id: str | None, cfg: Config) -> str:
@@ -25,23 +25,22 @@ def _resolve_elevenlabs_voice(voice_id: str | None, cfg: Config) -> str:
     return voice_id or cfg.elevenlabs_voice_id
 
 
+def _chosen_provider(cfg: Config, provider: str | None) -> str:
+    return (provider or cfg.tts_provider or "elevenlabs").strip().lower()
+
+
 def stop_speech() -> None:
     elevenlabs.stop()
 
 
-def speak(
+def _speak_with_cfg(
     text: str,
-    voice_id: str | None = None,
-    on_first_chunk: Callable[[], None] | None = None,
-    *,
-    provider: str | None = None,
+    cfg: Config,
+    voice_id: str | None,
+    on_first_chunk: Callable[[], None] | None,
+    provider: str | None,
 ) -> None:
-    """Speak text using the configured TTS provider with automatic fallback."""
-    if not (text or "").strip():
-        return
-
-    cfg = _cfg()
-    chosen = (provider or cfg.tts_provider or "elevenlabs").strip().lower()
+    chosen = _chosen_provider(cfg, provider)
 
     if chosen == "pyttsx3":
         logger.debug("🔊 TTS provider: pyttsx3 (local)")
@@ -49,7 +48,7 @@ def speak(
         return
 
     if chosen == "cartesia":
-        logger.debug("🔊 TTS provider: Cartesia")
+        logger.debug("🔊 TTS provider: Cartesia (voice=%s)", _resolve_cartesia_voice(voice_id, cfg))
         cartesia.speak_cartesia(
             text,
             _resolve_cartesia_voice(voice_id, cfg),
@@ -57,11 +56,16 @@ def speak(
         )
         return
 
-    logger.debug("🔊 TTS provider: ElevenLabs")
+    resolved_voice = _resolve_elevenlabs_voice(voice_id, cfg)
+    logger.debug(
+        "🔊 TTS provider: ElevenLabs (voice=%s, model=%s)",
+        resolved_voice,
+        cfg.elevenlabs_model_id,
+    )
     try:
         elevenlabs.speak(
             text,
-            voice_id=_resolve_elevenlabs_voice(voice_id, cfg),
+            voice_id=resolved_voice,
             model_id=cfg.elevenlabs_model_id,
             on_first_chunk=on_first_chunk,
         )
@@ -74,6 +78,19 @@ def speak(
         )
 
 
+def speak(
+    text: str,
+    voice_id: str | None = None,
+    on_first_chunk: Callable[[], None] | None = None,
+    *,
+    provider: str | None = None,
+) -> None:
+    """Speak text using the configured TTS provider with automatic fallback."""
+    if not (text or "").strip():
+        return
+    _speak_with_cfg(text.strip(), _cfg(), voice_id, on_first_chunk, provider)
+
+
 def speak_stream(
     text_chunks: Iterator[str],
     voice_id: str | None = None,
@@ -81,45 +98,26 @@ def speak_stream(
     *,
     provider: str | None = None,
 ) -> None:
-    """Speak streaming sentence chunks using the configured provider."""
-    cfg = _cfg()
-    chosen = (provider or cfg.tts_provider or "elevenlabs").strip().lower()
+    """Speak streaming sentence chunks; reloads provider/voice from config per chunk."""
+    first = True
+    for chunk in text_chunks:
+        if _cancelled():
+            return
+        text = (chunk or "").strip()
+        if not text:
+            continue
+        cb = on_first_chunk if first else None
+        first = False
+        _speak_with_cfg(text, _cfg(), voice_id, cb, provider)
 
-    if chosen == "pyttsx3":
-        logger.debug("🔊 TTS stream provider: pyttsx3 (local)")
-        for chunk in text_chunks:
-            text = (chunk or "").strip()
-            if text:
-                if on_first_chunk is not None:
-                    on_first_chunk()
-                    on_first_chunk = None
-                cartesia._speak_local(text)
-        return
 
-    if chosen == "cartesia":
-        logger.debug("🔊 TTS stream provider: Cartesia")
-        cartesia.speak_cartesia_stream(
-            text_chunks,
-            _resolve_cartesia_voice(voice_id, cfg),
-            on_first_chunk=on_first_chunk,
-        )
-        return
-
-    logger.debug("🔊 TTS stream provider: ElevenLabs")
+def _cancelled() -> bool:
     try:
-        elevenlabs.speak_stream(
-            text_chunks,
-            voice_id=_resolve_elevenlabs_voice(voice_id, cfg),
-            model_id=cfg.elevenlabs_model_id,
-            on_first_chunk=on_first_chunk,
-        )
-    except TTSError as exc:
-        logger.debug("ElevenLabs stream unavailable (%s) — falling back to Cartesia", exc)
-        cartesia.speak_cartesia_stream(
-            text_chunks,
-            _resolve_cartesia_voice(None, cfg),
-            on_first_chunk=on_first_chunk,
-        )
+        from tts.cartesia import _cancel
+
+        return _cancel.is_set()
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def speak_preview(
