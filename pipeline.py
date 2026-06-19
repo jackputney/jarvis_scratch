@@ -184,6 +184,12 @@ def resolve_wake_model(wake_word: str) -> str:
     return WAKE_WORD_MODELS.get("hey jarvis", "hey_jarvis")
 
 
+def wake_model_from_config(cfg: Config) -> str:
+    """OpenWakeWord model id from config (wakeword_model preferred, else wake_word)."""
+    model = (getattr(cfg, "wakeword_model", None) or cfg.wake_word or "hey_jarvis").strip()
+    return resolve_wake_model(model)
+
+
 def prepare_wake_word_model(wake_word: str) -> None:
     """Ensure the wake word ONNX model is present (may download on first run)."""
     _ensure_wake_model(resolve_wake_model(wake_word))
@@ -826,7 +832,7 @@ def _call_claude(
                 _emit_pipeline_state("WAITING_CONFIRM", on_state)
                 if not _interrupt.is_set():
                     logger.info("🔔 Awaiting dashboard approval for %s", tu["name"])
-                    speak(CONFIRM_PROMPT, voice_id=cfg.cartesia_voice_id)
+                    speak(CONFIRM_PROMPT)
             if _interrupt.is_set():
                 logger.info("⏹️  Tool confirm skipped (interrupt).")
                 return reply_text.strip() or "Stopped.", model, total_cost, stream_spoken
@@ -1041,7 +1047,7 @@ def run_pipeline(
     wake_event = threading.Event()
     audio_stop = threading.Event()
 
-    current_wake_word = resolve_wake_model(cfg.wake_word)
+    current_wake_word = wake_model_from_config(cfg)
     _ensure_wake_model(current_wake_word)
     audio_thread = _start_audio_thread(
         wake_event, capture_queue, capturing, paused, audio_stop, current_wake_word,
@@ -1052,9 +1058,9 @@ def run_pipeline(
             try:
                 cfg = Config.load()
 
-                resolved = resolve_wake_model(cfg.wake_word)
+                resolved = wake_model_from_config(cfg)
                 if resolved != current_wake_word:
-                    logger.info("🔁 Wake word changed to %r — rebuilding listener.", cfg.wake_word)
+                    logger.info("🔁 Wake model changed to %r — rebuilding listener.", resolved)
                     audio_stop.set()
                     if audio_thread is not None:
                         audio_thread.join(timeout=5.0)
@@ -1123,7 +1129,7 @@ def run_pipeline(
                     )
                     if not sub.accepted:
                         logger.warning("⏳ Queue full — voice command rejected.")
-                        speak(BUSY_MESSAGE, voice_id=cfg.cartesia_voice_id)
+                        speak(BUSY_MESSAGE)
                         set_state("IDLE")
                         break
 

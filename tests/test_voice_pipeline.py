@@ -14,7 +14,18 @@ def test_config_voice_tuning_defaults():
     assert cfg.barge_in_hits == 2
     assert cfg.followup_listen_sec == 5
     assert cfg.followup_vad_silence_ms == 900
-    assert cfg.tts_trailing_silence_ms == 150
+    assert cfg.tts_trailing_silence_ms == 100
+
+
+def test_config_wakeword_model_default():
+    cfg = Config()
+    assert cfg.wakeword_model == "hey_jarvis"
+
+
+def test_config_followup_window_seconds_alias(temp_env, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    cfg = Config.update_persisted({"followup_window_seconds": 8})
+    assert cfg.followup_listen_sec == 8
 
 
 def test_config_persists_voice_tuning(temp_env, monkeypatch):

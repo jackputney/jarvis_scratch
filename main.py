@@ -107,7 +107,7 @@ def _prepare_wake_word(cfg: Config) -> None:
     try:
         from pipeline import prepare_wake_word_model
 
-        prepare_wake_word_model(cfg.wake_word)
+        prepare_wake_word_model(cfg.wakeword_model or cfg.wake_word)
     except RuntimeError as exc:
         print(f"⚠️  {exc}")
         print("   Wake word detection will not work until the model downloads (internet required on first launch).")

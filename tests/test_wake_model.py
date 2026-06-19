@@ -8,7 +8,7 @@ from memory.knowledge import (
     get_recent_notes,
     write_note,
 )
-from pipeline import WAKE_WORD_MODELS, resolve_wake_model, prepare_wake_word_model
+from pipeline import WAKE_WORD_MODELS, resolve_wake_model, prepare_wake_word_model, wake_model_from_config
 
 
 @pytest.mark.parametrize(
@@ -33,6 +33,15 @@ def test_prepare_wake_word_model_resolves_before_ensure(monkeypatch):
     monkeypatch.setattr("pipeline._ensure_wake_model", _capture)
     prepare_wake_word_model("hey_jarvis")
     assert seen == ["hey_jarvis"]
+
+
+def test_wake_model_from_config_prefers_wakeword_model():
+    from config import Config
+
+    cfg = Config()
+    cfg.wakeword_model = "alexa"
+    cfg.wake_word = "hey_jarvis"
+    assert wake_model_from_config(cfg) == "alexa"
 
 
 def test_get_recent_notes_caps_each_note(temp_env):

@@ -52,6 +52,7 @@ _PERSISTED_FIELDS = (
     "confirm_before_execute",
     "ui_enabled",
     "wake_word",
+    "wakeword_model",
     "wake_word_enabled",
     "wakeword_threshold",
     "barge_in_enabled",
@@ -111,6 +112,7 @@ class Config:
     confirm_before_execute: bool = True
     ui_enabled: bool = True
     wake_word: str = "hey_jarvis"
+    wakeword_model: str = "hey_jarvis"  # openwakeword model id (change without code edits)
     wake_word_enabled: bool = True
     wakeword_threshold: float = 0.5
     barge_in_enabled: bool = True  # say the wake word during a reply to cut it off and ask again
@@ -119,7 +121,7 @@ class Config:
     followup_listen_sec: int = 5
     followup_vad_silence_ms: int = 900
     followup_vad_min_capture_ms: int = 500
-    tts_trailing_silence_ms: int = 150
+    tts_trailing_silence_ms: int = 100
     hotkey_enabled: bool = True  # register a global keyboard shortcut to wake Jarvis
     hotkey_combo: str = "<ctrl>+<shift>+<space>"  # pynput format: <ctrl>/<shift>/<alt>/<cmd> + key
     dashboard_native_window: bool = True  # open dashboard in PyWebView on macOS (Flask still on :7777)
@@ -176,12 +178,18 @@ class Config:
             confirm_before_execute=data.get("confirm_before_execute", cls.confirm_before_execute),
             ui_enabled=data.get("ui_enabled", cls.ui_enabled),
             wake_word=data.get("wake_word", cls.wake_word),
+            wakeword_model=data.get("wakeword_model", cls.wakeword_model),
             wake_word_enabled=data.get("wake_word_enabled", cls.wake_word_enabled),
             wakeword_threshold=float(data.get("wakeword_threshold", cls.wakeword_threshold)),
             barge_in_enabled=data.get("barge_in_enabled", cls.barge_in_enabled),
             barge_in_threshold=float(data.get("barge_in_threshold", cls.barge_in_threshold)),
             barge_in_hits=int(data.get("barge_in_hits", cls.barge_in_hits)),
-            followup_listen_sec=int(data.get("followup_listen_sec", cls.followup_listen_sec)),
+            followup_listen_sec=int(
+                data.get(
+                    "followup_window_seconds",
+                    data.get("followup_listen_sec", cls.followup_listen_sec),
+                )
+            ),
             followup_vad_silence_ms=int(data.get("followup_vad_silence_ms", cls.followup_vad_silence_ms)),
             followup_vad_min_capture_ms=int(
                 data.get("followup_vad_min_capture_ms", cls.followup_vad_min_capture_ms)
@@ -257,12 +265,14 @@ class Config:
 
     @staticmethod
     def update_persisted(changes: dict) -> "Config":
+        aliases = {"followup_window_seconds": "followup_listen_sec"}
+        normalized = {aliases.get(k, k): v for k, v in changes.items()}
         current: dict = {}
         if CONFIG_PATH.exists():
             with open(CONFIG_PATH) as fh:
                 current = json.load(fh)
         template = Config()
-        for key, value in changes.items():
+        for key, value in normalized.items():
             if key not in _PERSISTED_FIELDS:
                 continue
             default = getattr(template, key)
