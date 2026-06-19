@@ -165,6 +165,8 @@ class Orchestrator:
         cfg = self._config_loader() if self._config_loader else None
         sentence_q: queue.Queue[str | None] | None = None
         tts_thread: threading.Thread | None = None
+        tts_audio_started = False
+        result: dict[str, Any] = {}
         use_stream_tts = (
             command.speak
             and cfg is not None
@@ -181,13 +183,18 @@ class Orchestrator:
                             return
                         yield item
 
+                def _mark_speaking() -> None:
+                    nonlocal tts_audio_started
+                    tts_audio_started = True
+                    self._set_state("SPEAKING")
+
                 def _run_stream_tts() -> None:
                     from tts.router import speak_stream
 
                     speak_stream(
                         _sentence_iter(),
                         voice_id=None,
-                        on_first_chunk=lambda: self._set_state("SPEAKING"),
+                        on_first_chunk=_mark_speaking,
                     )
 
                 tts_thread = threading.Thread(
@@ -255,6 +262,19 @@ class Orchestrator:
                         break
                     tts_thread.join(timeout=0.1)
                 tts_thread.join()
+            # stream_spoken without playback leaves the user silent — speak the full reply.
+            if (
+                use_stream_tts
+                and command.speak
+                and not self._interrupt_set()
+                and job.state in (JobState.DONE, JobState.FAILED)
+                and bool(job.reply.strip())
+                and bool(result.get("stream_spoken"))
+                and not tts_audio_started
+            ):
+                spoken = f"{job.warning} {job.reply}" if job.warning else job.reply
+                self._set_state("SPEAKING")
+                self._do_speak(spoken, cfg)
             self._set_state("IDLE")
             self._emit("job.state", job_id=command.id, state=job.state.value)
             job.done_event.set()

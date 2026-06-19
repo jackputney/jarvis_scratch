@@ -116,8 +116,8 @@ class Config:
     wake_word_enabled: bool = True
     wakeword_threshold: float = 0.5
     barge_in_enabled: bool = True  # say the wake word during a reply to cut it off and ask again
-    barge_in_threshold: float = 0.42
-    barge_in_hits: int = 1
+    barge_in_threshold: float = 0.48
+    barge_in_hits: int = 2
     followup_listen_sec: int = 5
     followup_vad_silence_ms: int = 600
     followup_vad_min_capture_ms: int = 350

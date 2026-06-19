@@ -16,3 +16,4 @@ def test_clear_interrupt():
     pipeline.request_interrupt()
     pipeline._clear_interrupt()
     assert not pipeline.interrupt_requested()
+    assert not cartesia._cancel.is_set()

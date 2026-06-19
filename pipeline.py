@@ -158,6 +158,11 @@ def interrupt_requested() -> bool:
 
 def _clear_interrupt() -> None:
     _interrupt.clear()
+    # Barge-in / Stop sets _cancel via stop_speech(); must reset before the next turn
+    # or speak_stream exits immediately while stream_spoken blocks the fallback path.
+    from tts.cartesia import _cancel
+
+    _cancel.clear()
 
 
 _warn_state: dict[str, Any] = {"date": None}

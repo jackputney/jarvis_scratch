@@ -26,7 +26,16 @@ def _resolve_elevenlabs_voice(voice_id: str | None, cfg: Config) -> str:
 
 
 def _chosen_provider(cfg: Config, provider: str | None) -> str:
-    return (provider or cfg.tts_provider or "elevenlabs").strip().lower()
+    chosen = (provider or cfg.tts_provider or "elevenlabs").strip().lower()
+    if chosen == "elevenlabs" and not (cfg.elevenlabs_api_key or "").strip():
+        if (cfg.cartesia_api_key or "").strip():
+            return "cartesia"
+        return "pyttsx3"
+    if chosen == "cartesia" and not (cfg.cartesia_api_key or "").strip():
+        if (cfg.elevenlabs_api_key or "").strip():
+            return "elevenlabs"
+        return "pyttsx3"
+    return chosen
 
 
 def stop_speech() -> None:
@@ -88,6 +97,9 @@ def speak(
     """Speak text using the configured TTS provider with automatic fallback."""
     if not (text or "").strip():
         return
+    from tts.cartesia import _cancel
+
+    _cancel.clear()
     _speak_with_cfg(text.strip(), _cfg(), voice_id, on_first_chunk, provider)
 
 
@@ -99,6 +111,9 @@ def speak_stream(
     provider: str | None = None,
 ) -> None:
     """Speak streaming sentence chunks; reloads provider/voice from config per chunk."""
+    from tts.cartesia import _cancel
+
+    _cancel.clear()
     first = True
     for chunk in text_chunks:
         if _cancelled():

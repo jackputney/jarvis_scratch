@@ -19,9 +19,9 @@ from tts.cartesia import FRAME_BYTES, _silence_pcm, _trailing_silence_ms
 
 def test_config_voice_tuning_defaults():
     cfg = Config()
-    assert cfg.wakeword_threshold == 0.5
-    assert cfg.barge_in_threshold == 0.42
-    assert cfg.barge_in_hits == 1
+    assert cfg.barge_in_threshold == 0.48
+    assert cfg.barge_in_hits == 2
+    assert cfg.followup_listen_sec == 5
     assert cfg.followup_vad_silence_ms == 600
     assert cfg.tts_trailing_silence_ms == 80
 
