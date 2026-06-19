@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import platform
 from pathlib import Path
 
 from paths import env_path, mark_onboarding_complete, needs_onboarding
@@ -143,10 +144,19 @@ def run_onboarding_wizard(*, network_validation: bool = True) -> bool:
         stack.addWidget(w)
         return w
 
+    storage_dir = env_path().parent
+    if platform.system() == "Windows":
+        storage_hint = f"%APPDATA%\\Jarvis ({storage_dir})"
+    elif platform.system() == "Darwin":
+        storage_hint = f"~/Library/Application Support/Jarvis ({storage_dir})"
+    else:
+        storage_hint = str(storage_dir)
+
     _page(
         "Welcome to Jarvis",
-        "This quick setup collects your API keys and saves them locally on your Mac. "
-        "Nothing is sent anywhere except to Anthropic when you validate your key.",
+        "This quick setup collects your API keys and saves them locally on this computer "
+        f"({storage_hint}). Nothing is sent anywhere except to Anthropic when you "
+        "validate your key.",
     )
 
     anthropic_form = QWidget()
