@@ -3,8 +3,8 @@
 ## Purpose
 
 Record every interaction turn in SQLite for future reflection, scoring, and
-suggestions. Stage 1 is **write-only instrumentation** — no LLM reflection, no
-auto-apply.
+suggestions. Stage 1 is **write-only instrumentation**. Stage 3 adds
+**Jarvis Thinks**: heuristic + haiku reflection with human accept/dismiss gates.
 
 ## Principles
 
@@ -31,3 +31,11 @@ Tables in `memory/variables.db` (WAL): `sessions`, `turns`, `events`,
 - `detect_repeat_request(history, curr)` — repeat within window.
 
 Corrections persisted when previous turn text is available at turn end.
+
+## Stage 3 — Jarvis Thinks
+
+- `GET /api/improvement/suggestions?status=pending&limit=20`
+- `POST /api/improvement/suggestions/<id>/accept|dismiss`
+- `POST /api/improvement/suggestions/generate` → runs `improvement/reflect.py`
+- Reflection uses **claude-haiku-4-5** only; suggestions stay `pending` until accepted.
+- `TurnTrace.cancel()` marks in-flight turns when Stop / barge-in fires.

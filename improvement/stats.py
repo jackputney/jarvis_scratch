@@ -34,6 +34,9 @@ def compute_stats() -> dict[str, Any]:
         tts_fallbacks = conn.execute(
             "SELECT COUNT(*) FROM events WHERE type = 'tts_fallback'"
         ).fetchone()[0]
+        slow_turns = conn.execute(
+            "SELECT COUNT(*) FROM turns WHERE total_ms IS NOT NULL AND total_ms > 10000"
+        ).fetchone()[0]
 
         tool_rows = conn.execute(
             """
@@ -72,6 +75,7 @@ def compute_stats() -> dict[str, Any]:
         "correction_rate": round(correction_count / tc, 4),
         "tool_error_rate": round(tool_errors / max(1, tool_calls + tool_errors), 4),
         "tts_fallback_rate": round(tts_fallbacks / tc, 4),
+        "slow_turn_rate": round(int(slow_turns) / tc, 4),
         "top_tools": top_tools,
     }
 

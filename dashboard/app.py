@@ -206,6 +206,35 @@ def create_app() -> Flask:
 
         return jsonify(compute_stats())
 
+    @app.route("/api/improvement/suggestions")
+    def api_improvement_suggestions():  # noqa: ANN202
+        from improvement.reflect import fetch_suggestions
+
+        status = request.args.get("status", "pending")
+        limit = request.args.get("limit", 20, type=int)
+        return jsonify({"suggestions": fetch_suggestions(status=status, limit=limit)})
+
+    @app.route("/api/improvement/suggestions/<suggestion_id>/accept", methods=["POST"])
+    def api_improvement_suggestion_accept(suggestion_id: str):  # noqa: ANN202
+        from improvement.reflect import update_suggestion_status
+
+        ok = update_suggestion_status(suggestion_id, "accepted")
+        return jsonify({"ok": ok}), (200 if ok else 404)
+
+    @app.route("/api/improvement/suggestions/<suggestion_id>/dismiss", methods=["POST"])
+    def api_improvement_suggestion_dismiss(suggestion_id: str):  # noqa: ANN202
+        from improvement.reflect import update_suggestion_status
+
+        ok = update_suggestion_status(suggestion_id, "dismissed")
+        return jsonify({"ok": ok}), (200 if ok else 404)
+
+    @app.route("/api/improvement/suggestions/generate", methods=["POST"])
+    def api_improvement_suggestions_generate():  # noqa: ANN202
+        from improvement.reflect import run_reflection
+
+        items = run_reflection()
+        return jsonify({"ok": True, "count": len(items), "suggestions": items})
+
     # -- Real-time event stream (SSE) --------------------------------------
     @app.route("/api/events")
     def api_events():  # noqa: ANN202

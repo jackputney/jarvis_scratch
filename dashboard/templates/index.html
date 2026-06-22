@@ -52,6 +52,9 @@
         <button type="button" class="nav-item" data-view="hub">
           <i class="ti ti-plug-connected nav-ico" aria-hidden="true"></i><span>Hub</span>
         </button>
+        <button type="button" class="nav-item" data-view="thinks">
+          <i class="ti ti-bulb nav-ico" aria-hidden="true"></i><span>Jarvis Thinks</span>
+        </button>
         <button type="button" class="nav-item" data-view="settings">
           <i class="ti ti-settings nav-ico" aria-hidden="true"></i><span>Settings</span>
         </button>
@@ -356,6 +359,32 @@
             <button type="button" id="hub-preflight" class="primary">Run preflight</button>
             <pre id="hub-preflight-result" class="hub-preflight hidden"></pre>
           </div>
+        </div>
+      </section>
+
+      <!-- Jarvis Thinks -->
+      <section id="view-thinks" class="view" data-view="thinks">
+        <header class="view-header thinks-header">
+          <div>
+            <h1>Jarvis Thinks</h1>
+            <p class="sub">Self-improvement suggestions from recent turns</p>
+          </div>
+          <button type="button" id="thinks-refresh" class="primary">
+            <i class="ti ti-refresh" aria-hidden="true"></i> Refresh
+          </button>
+        </header>
+
+        <div class="thinks-stats" id="thinks-stats">
+          <div class="thinks-stat"><span class="lbl">Correction rate</span><span class="val" id="thinks-stat-correction">—</span></div>
+          <div class="thinks-stat"><span class="lbl">Tool error rate</span><span class="val" id="thinks-stat-tool">—</span></div>
+          <div class="thinks-stat"><span class="lbl">Avg latency</span><span class="val" id="thinks-stat-latency">—</span></div>
+          <div class="thinks-stat"><span class="lbl">TTS fallback rate</span><span class="val" id="thinks-stat-tts">—</span></div>
+        </div>
+
+        <div class="thinks-cards" id="thinks-cards"></div>
+        <div class="view-empty-state hidden" id="thinks-empty">
+          <i class="ti ti-bulb" aria-hidden="true"></i>
+          <p>Jarvis hasn't found any issues yet. Click Refresh to run an analysis.</p>
         </div>
       </section>
 
