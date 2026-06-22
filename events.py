@@ -30,7 +30,7 @@ MAX_EVENTS = 200
 _lock = threading.Lock()
 _events: deque[dict] = deque(maxlen=MAX_EVENTS)
 _state: dict[str, Any] = {
-    "pipeline_state": "IDLE",  # IDLE | LISTENING | THINKING | WAITING_CONFIRM | SPEAKING
+    "pipeline_state": "IDLE",  # IDLE | LISTENING | THINKING | SPEAKING | FOLLOWUP_WINDOW | WAITING_CONFIRM
     "muted": False,
     "started_at": time.time(),
 }

@@ -54,6 +54,13 @@ from memory.semantic import build_recall_context
 from memory.variables import build_variables_block
 from tools.registry import CONFIRM_REQUIRED_TOOLS, TOOL_DEFINITIONS, dispatch_tool
 from tts.cartesia import speak, speak_stream, stop_speech
+from voice.speech_state import (
+    BARGEIN_GRACE_SEC,
+    BargeInGate,
+    SpeechPhase,
+    WAKE_DETECTION_OFF_STATES,
+    transition,
+)
 
 logger = logging.getLogger("jarvis.pipeline")
 
@@ -89,12 +96,6 @@ FOLLOWUP_WAIT_FRAMES = int(5000 / FRAME_DURATION_MS)
 ANSWER_WAIT_FRAMES = int(12000 / FRAME_DURATION_MS)
 PRE_ROLL_FRAMES = 8
 WAKE_CONSECUTIVE_HITS = 2
-# Wake detection stays off during these pipeline states (F5 echo guard).
-_WAKE_DETECTION_OFF_STATES = frozenset(
-    {"LISTENING", "SPEAKING", "THINKING", "WAITING_CONFIRM"}
-)
-# Mid-reply barge-in tuning (Phase 2: VAD barge-in replaces wake-word barge).
-BARGEIN_GRACE_SEC = 1.5
 AUDIO_THREAD_RESTART_DELAY = 2.0
 ENERGY_VAD_THRESHOLD = 250
 HOTWORDS_TTL_SECONDS = 600
@@ -269,12 +270,12 @@ def wake_detection_paused(
     state = pipeline_state
     if state is None:
         state = events.get_state().get("pipeline_state", "IDLE")
-    return state in _WAKE_DETECTION_OFF_STATES
+    return state in WAKE_DETECTION_OFF_STATES
 
 
 def _sync_detection_pause(state: str, paused: threading.Event) -> None:
     """Mirror pipeline state into the detection-pause flag (F5)."""
-    if state in _WAKE_DETECTION_OFF_STATES:
+    if state in WAKE_DETECTION_OFF_STATES:
         paused.set()
 
 
@@ -286,15 +287,33 @@ def _drain_queue(q: "queue.Queue[bytes]") -> None:
             return
 
 
-def _is_speech_energy(data: bytes) -> bool:
-    """Lightweight energy-based speech detector — fallback when webrtcvad is absent."""
+def _barge_energy_threshold(cfg: Config) -> int:
+    """Scale energy VAD threshold from config barge_in_threshold (0.5 = baseline)."""
+    return max(100, int(ENERGY_VAD_THRESHOLD * cfg.barge_in_threshold / 0.5))
+
+
+def _frame_is_speech(data: bytes, cfg: Config, *, energy_threshold: int | None = None) -> bool:
+    """True when a single mic frame looks like user speech (webrtcvad or RMS)."""
+    if webrtcvad is not None:
+        try:
+            result = webrtcvad.Vad(2).is_speech(data, AUDIO_RATE)
+            if isinstance(result, bool):
+                return result
+        except Exception:  # noqa: BLE001
+            pass
     import numpy as np
 
     audio = np.frombuffer(data, dtype=np.int16)
     if audio.size == 0:
         return False
     rms = float(np.sqrt(np.mean(audio.astype(np.float64) ** 2)))
-    return rms > ENERGY_VAD_THRESHOLD
+    threshold = energy_threshold if energy_threshold is not None else ENERGY_VAD_THRESHOLD
+    return rms > threshold
+
+
+def _is_speech_energy(data: bytes) -> bool:
+    """Lightweight energy-based speech detector — fallback when webrtcvad is absent."""
+    return _frame_is_speech(data, Config.load())
 
 
 def _read_audio_frame(stream: Any, *, use_sounddevice: bool) -> bytes:
@@ -313,6 +332,7 @@ def _audio_loop(
     paused: threading.Event,
     audio_stop: threading.Event,
     wake_word: str,
+    barge_gate: BargeInGate,
 ) -> None:
     import numpy as np
     from openwakeword.model import Model
@@ -355,6 +375,7 @@ def _audio_loop(
     logger.info("👂 Wake word listener active — say '%s' to activate", wake_word)
 
     was_inactive = False
+    barge_energy = ENERGY_VAD_THRESHOLD
     try:
         while not audio_stop.is_set():
             data = _read_audio_frame(stream, use_sounddevice=use_sounddevice)
@@ -364,7 +385,31 @@ def _audio_loop(
                 was_inactive = True
                 continue
 
-            if wake_detection_paused(capturing, paused):
+            pipeline_state = events.get_state().get("pipeline_state", "IDLE")
+            cfg = Config.load()
+
+            # VAD barge-in: user talks over Jarvis during SPEAKING (after grace arms).
+            if (
+                pipeline_state == SpeechPhase.SPEAKING.value
+                and barge_gate.armed.is_set()
+                and cfg.barge_in_enabled
+            ):
+                barge_energy = _barge_energy_threshold(cfg)
+                if _frame_is_speech(data, cfg, energy_threshold=barge_energy):
+                    barge_gate.speech_frames += 1
+                    capture_queue.put(data)
+                    if barge_gate.speech_frames >= cfg.barge_in_hits:
+                        logger.info("🎙️  VAD barge-in — stopping reply to listen.")
+                        stop_speech()
+                        barge_gate.triggered.set()
+                        barge_gate.armed.clear()
+                        capturing.set()
+                        was_inactive = True
+                else:
+                    barge_gate.speech_frames = 0
+                continue
+
+            if wake_detection_paused(capturing, paused, pipeline_state=pipeline_state):
                 was_inactive = True
                 continue
 
@@ -374,7 +419,6 @@ def _audio_loop(
 
             audio_int16 = np.frombuffer(data, dtype=np.int16)
             oww_model.predict(audio_int16)
-            cfg = Config.load()
             threshold = cfg.wakeword_threshold
             hits = WAKE_CONSECUTIVE_HITS
             for name, scores in oww_model.prediction_buffer.items():
@@ -408,6 +452,7 @@ def _start_audio_thread(
     paused: threading.Event,
     audio_stop: threading.Event,
     wake_word: str,
+    barge_gate: BargeInGate,
 ) -> threading.Thread:
     def _run() -> None:
         try:
@@ -425,7 +470,10 @@ def _start_audio_thread(
 
         while not audio_stop.is_set():
             try:
-                _audio_loop(wake_event, capture_queue, capturing, paused, audio_stop, wake_word)
+                _audio_loop(
+                    wake_event, capture_queue, capturing, paused, audio_stop, wake_word,
+                    barge_gate,
+                )
             except Exception as exc:  # noqa: BLE001
                 logger.error(
                     "⚠️  Audio listener crashed (%s) — restarting in %.0fs",
@@ -602,10 +650,12 @@ def _capture_and_transcribe(
     wait_for_speech_frames: int = WAIT_FOR_SPEECH_FRAMES,
     silence_ms: int | None = None,
     min_capture_ms: int | None = None,
+    skip_drain: bool = False,
 ) -> str | None:
     """Record one utterance and transcribe it. Returns None if nothing was heard."""
-    set_state("LISTENING")
-    _drain_queue(capture_queue)
+    transition(set_state, SpeechPhase.LISTENING, reason="capture")
+    if not skip_drain:
+        _drain_queue(capture_queue)
     capturing.set()
     audio_bytes = _record_from_queue(
         capture_queue,
@@ -626,7 +676,7 @@ def _capture_and_transcribe(
         logger.info("⚠️  No speech captured.")
         return None
 
-    set_state("THINKING")
+    transition(set_state, SpeechPhase.THINKING, reason="transcribe")
     try:
         text = _transcribe(audio_bytes, cfg)
     except Exception as exc:  # noqa: BLE001
@@ -991,29 +1041,47 @@ def _wait_for_job_with_bargein(
     capture_queue: "queue.Queue[bytes]",
     capturing: threading.Event,
     paused: threading.Event,
+    barge_gate: BargeInGate,
     timeout: float = VOICE_JOB_TIMEOUT_SEC,
 ) -> tuple[Any, bool]:
-    """Wait for a voice job to finish, allowing a wake-word barge-in.
+    """Wait for a voice job, allowing VAD barge-in once TTS is playing.
 
-    Returns ``(job, barged)``. While the reply is still being generated
-    (THINKING) wake detection stays paused so the wake utterance that started
-    this turn can't re-fire and interrupt the reply "by nothing". Once audio
-    starts playing (state SPEAKING) we discard any residual wake hit and re-arm
-    detection; if the user says the wake word over the reply we cancel the turn
-    — stopping speech through the same interrupt path as the Stop button — and
-    return ``barged=True`` so the caller can immediately capture the new request.
-
-    When barge-in or the wake word is disabled this degrades to a plain
-    blocking wait.
+    Returns ``(job, barged)``. Wake-word detection stays off during the reply
+    (echo guard). After ``BARGEIN_GRACE_SEC`` of SPEAKING, VAD barge-in arms:
+    sustained user speech stops TTS and returns ``barged=True``.
     """
+    barge_gate.reset()
+    speaking_since: float | None = None
     deadline = time.monotonic() + timeout
     while True:
         job = orchestrator.wait(job_id, timeout=0.1)
         if job is None or job.done_event.is_set() or time.monotonic() > deadline:
+            barge_gate.reset()
             _reset_audio_for_followup(wake_event, capture_queue, capturing, paused)
             return job, False
-        # Wake-word barge-in during SPEAKING is disabled until Phase 2 (VAD barge-in).
-        # Detection stays paused via wake_detection_paused() so Jarvis cannot wake itself.
+
+        if not cfg.barge_in_enabled:
+            continue
+
+        state = events.get_state().get("pipeline_state")
+        if state == SpeechPhase.SPEAKING.value and speaking_since is None:
+            speaking_since = time.monotonic()
+
+        if (
+            speaking_since is not None
+            and not barge_gate.armed.is_set()
+            and time.monotonic() - speaking_since >= BARGEIN_GRACE_SEC
+        ):
+            barge_gate.armed.set()
+            barge_gate.speech_frames = 0
+            _drain_queue(capture_queue)
+            logger.debug("🎙️  VAD barge-in armed (grace %.0fms elapsed).", BARGEIN_GRACE_SEC * 1000)
+
+        if barge_gate.triggered.is_set():
+            logger.info("⏹️  Barge-in — abandoning reply to capture user speech.")
+            orchestrator.cancel_current()
+            barge_gate.reset()
+            return job, True
 
 
 def run_pipeline(
@@ -1050,11 +1118,13 @@ def run_pipeline(
     paused = threading.Event()
     wake_event = threading.Event()
     audio_stop = threading.Event()
+    barge_gate = BargeInGate()
 
     current_wake_word = wake_model_from_config(cfg)
     _ensure_wake_model(current_wake_word)
     audio_thread = _start_audio_thread(
         wake_event, capture_queue, capturing, paused, audio_stop, current_wake_word,
+        barge_gate,
     )
 
     try:
@@ -1073,6 +1143,7 @@ def run_pipeline(
                     audio_stop = threading.Event()
                     audio_thread = _start_audio_thread(
                         wake_event, capture_queue, capturing, paused, audio_stop, current_wake_word,
+                        barge_gate,
                     )
 
                 if audio_thread is not None and not audio_thread.is_alive():
@@ -1082,6 +1153,7 @@ def run_pipeline(
                     audio_stop = threading.Event()
                     audio_thread = _start_audio_thread(
                         wake_event, capture_queue, capturing, paused, audio_stop, current_wake_word,
+                        barge_gate,
                     )
 
                 if is_muted is not None:
@@ -1109,7 +1181,9 @@ def run_pipeline(
                     wake_event.clear()
 
                 if is_muted is not None and is_muted():
-                    logger.info("🔇 Muted — ignoring wake word.")
+                    logger.info(
+                        "🔇 Muted — ignoring wake word. Click the orb to unmute."
+                    )
                     capturing.clear()
                     _drain_queue(capture_queue)
                     continue
@@ -1139,21 +1213,19 @@ def run_pipeline(
 
                     job, barged = _wait_for_job_with_bargein(
                         orchestrator, sub.job_id, cfg,
-                        wake_event, capture_queue, capturing, paused,
+                        wake_event, capture_queue, capturing, paused, barge_gate,
                     )
                     push_budget_level(cfg)
                     if job is not None and job.reply:
                         logger.info("💬 Reply: %s", job.reply)
 
                     if barged:
-                        # The user said the wake word over the reply: speech is
-                        # already stopping. Clear the interrupt so this isn't
-                        # treated as a full abort, then capture the new request
-                        # right away (the audio thread is already listening).
                         _clear_interrupt()
                         wake_event.clear()
+                        transition(set_state, SpeechPhase.LISTENING, reason="barge-in")
                         text = _capture_and_transcribe(
                             capture_queue, capturing, paused, cfg, set_state,
+                            skip_drain=True,
                         )
                         continue
 
@@ -1171,6 +1243,11 @@ def run_pipeline(
                     )
                     _reset_audio_for_followup(wake_event, capture_queue, capturing, paused)
                     time.sleep(0.15)
+                    transition(
+                        set_state,
+                        SpeechPhase.FOLLOWUP_WINDOW,
+                        reason="awaiting answer" if awaiting_answer else "follow-up",
+                    )
                     logger.info(
                         "👂 %s…",
                         "Waiting for your answer" if awaiting_answer else "Listening for follow-up",

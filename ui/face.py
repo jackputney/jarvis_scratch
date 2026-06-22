@@ -61,6 +61,7 @@ HUD_SIZE = HUD_W
 STATE_COLORS: dict[str, QColor] = {
     "IDLE": QColor("#6C7BF7"),
     "LISTENING": QColor("#34D399"),
+    "FOLLOWUP_WINDOW": QColor("#34D399"),
     "THINKING": QColor("#8B5CF6"),
     "SPEAKING": QColor("#6C7BF7"),
     "WAITING_CONFIRM": QColor("#FBBF24"),
@@ -70,6 +71,7 @@ STATE_COLORS: dict[str, QColor] = {
 _STATE_LABELS: dict[str, tuple[str, str]] = {
     "IDLE": ("Jarvis", ""),
     "LISTENING": ("Listening...", ""),
+    "FOLLOWUP_WINDOW": ("Listening...", "Follow-up"),
     "THINKING": ("Thinking...", ""),
     "SPEAKING": ("Speaking...", ""),
     "WAITING_CONFIRM": ("Needs approval", "Check dashboard"),
@@ -79,6 +81,7 @@ _STATE_LABELS: dict[str, tuple[str, str]] = {
 _STATE_TOOLTIPS = {
     "IDLE": "Jarvis — idle",
     "LISTENING": "Jarvis — listening...",
+    "FOLLOWUP_WINDOW": "Jarvis — follow-up window",
     "THINKING": "Jarvis — thinking...",
     "SPEAKING": "Jarvis — speaking...",
     "WAITING_CONFIRM": "Jarvis — awaiting approval",
@@ -147,6 +150,7 @@ class JarvisState(Enum):
     THINKING = auto()
     WAITING_CONFIRM = auto()
     SPEAKING = auto()
+    FOLLOWUP_WINDOW = auto()
 
 
 class OrbAnimator:
@@ -244,6 +248,9 @@ class OrbAnimator:
         self._sonar_phase = cycle / 800.0
         self._sonar_radius = CORE_RADIUS + 10.0 + self._sonar_phase * 10.0
 
+    def _anim_followup_window(self) -> None:
+        self._anim_listening()
+
     def _anim_thinking(self) -> None:
         self._arc_angle = (self._arc_angle + 5.0) % 360
         self.glow_intensity = 0.5
@@ -317,6 +324,10 @@ class OrbWidget(QWidget):
         self.mute_toggled.emit(self.muted)
         self._update_tooltip()
         self.update()
+
+    def stop_animations(self) -> None:
+        """Halt the orb animation timer (clean shutdown)."""
+        self._animator._timer.stop()
 
     def mousePressEvent(self, event) -> None:  # noqa: ANN001
         pos = event.position()
@@ -598,6 +609,7 @@ class FaceWidget(QWidget):
         """Allow the window to close during app exit."""
         self._shutting_down = True
         self._visibility_timer.stop()
+        self._orb.stop_animations()
         self.close()
 
     @property
