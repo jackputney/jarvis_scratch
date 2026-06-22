@@ -52,11 +52,16 @@ def get_orchestrator() -> Orchestrator:
                     events.set_pipeline_state(payload.get("state", "IDLE"))
 
             _bus.subscribe(_sync_legacy)
+            import pipeline
+
             _orchestrator = Orchestrator(
                 bus=_bus,
                 process_query=_default_process_query,
                 speak=_default_speak,
                 config_loader=Config.load,
+                interrupt_event=pipeline._interrupt,
+                request_interrupt=pipeline.request_interrupt,
+                clear_interrupt=pipeline._clear_interrupt,
             )
         return _orchestrator
 

@@ -41,7 +41,7 @@ const STATE_LABELS = {
   SPEAKING: "Speaking",
 };
 
-const VIEW_ORDER = ["overview", "activity", "tools", "memory", "contacts", "plugins", "hub", "settings"];
+const VIEW_ORDER = ["overview", "activity", "tools", "memory", "contacts", "plugins", "hub", "thinks", "settings"];
 
 const AVATAR_COLORS = [
   { bg: "var(--accent-subtle)", color: "var(--accent)" },
@@ -144,6 +144,7 @@ function switchView(name) {
     loadDevicePanel();
     loadMusicPanel();
   }
+  if (name === "thinks") loadThinksView();
   document.dispatchEvent(new CustomEvent("jarvis:view", { detail: name }));
 }
 
@@ -1423,10 +1424,27 @@ $("dock-input").addEventListener("keydown", (e) => {
 });
 
 $("dock-stop").onclick = async () => {
-  await sendJSON("/api/interrupt", "POST");
-  $("dock-reply").classList.add("show");
-  $("dock-reply").textContent = "Stopped.";
-  showToast("Interrupted", "info");
+  const btn = $("dock-stop");
+  if (btn.disabled) return;
+  btn.disabled = true;
+  btn.classList.add("stopping");
+  btn.title = "Stopping…";
+  const reply = $("dock-reply");
+  reply.classList.add("show");
+  reply.textContent = "Stopping…";
+  try {
+    await sendJSON("/api/interrupt", "POST");
+    reply.textContent = "Stopped.";
+    showToast("Interrupted", "info");
+  } catch {
+    reply.textContent = "Stop failed (network)";
+    showToast("Stop failed", "err");
+  } finally {
+    btn.disabled = false;
+    btn.classList.remove("stopping");
+    btn.title = "Stop";
+    refresh();
+  }
 };
 
 // ---- Variables --------------------------------------------------------
@@ -1633,6 +1651,117 @@ function connectEvents() {
     }
   };
 }
+
+// ---- Jarvis Thinks ----------------------------------------------------
+const SEVERITY_CLASS = {
+  critical: "sev-critical",
+  high: "sev-high",
+  medium: "sev-medium",
+  low: "sev-low",
+};
+
+function fmtRate(v) {
+  if (v == null || Number.isNaN(Number(v))) return "—";
+  return `${(Number(v) * 100).toFixed(1)}%`;
+}
+
+async function loadThinksStats() {
+  try {
+    const s = await getJSON("/api/improvement/stats");
+    $("thinks-stat-correction").textContent = fmtRate(s.correction_rate);
+    $("thinks-stat-tool").textContent = fmtRate(s.tool_error_rate);
+    $("thinks-stat-latency").textContent =
+      s.avg_total_ms != null ? `${Math.round(s.avg_total_ms)} ms` : "—";
+    $("thinks-stat-tts").textContent = fmtRate(s.tts_fallback_rate);
+  } catch {
+    /* transient */
+  }
+}
+
+function renderThinksCards(items) {
+  const wrap = $("thinks-cards");
+  const empty = $("thinks-empty");
+  wrap.innerHTML = "";
+  if (!items.length) {
+    empty.classList.remove("hidden");
+    return;
+  }
+  empty.classList.add("hidden");
+  items.forEach((s) => {
+    const card = document.createElement("article");
+    card.className = "thinks-card panel";
+    const sev = (s.severity || "low").toLowerCase();
+    const accepted = s.status === "accepted";
+    card.innerHTML =
+      `<div class="thinks-card-head">` +
+      `<span class="thinks-sev ${SEVERITY_CLASS[sev] || "sev-low"}">${esc(sev)}</span>` +
+      `<h3>${esc(s.title || "Suggestion")}</h3>` +
+      `</div>` +
+      `<p class="thinks-body">${esc(s.body || "")}</p>` +
+      `<pre class="thinks-change">${esc(s.proposed_change || "")}</pre>` +
+      `<div class="thinks-actions">` +
+      (accepted
+        ? `<button type="button" class="ghost thinks-copy" data-id="${esc(s.id)}">Send to Cursor</button>`
+        : `<button type="button" class="primary thinks-accept" data-id="${esc(s.id)}">Accept</button>` +
+          `<button type="button" class="ghost thinks-dismiss" data-id="${esc(s.id)}">Dismiss</button>`) +
+      `</div>`;
+    wrap.appendChild(card);
+  });
+}
+
+async function loadThinksView() {
+  await loadThinksStats();
+  try {
+    const data = await getJSON("/api/improvement/suggestions?status=pending&limit=20");
+    renderThinksCards(data.suggestions || []);
+  } catch {
+    renderThinksCards([]);
+  }
+}
+
+async function generateThinks() {
+  const btn = $("thinks-refresh");
+  btn.disabled = true;
+  btn.textContent = "Analysing…";
+  try {
+    await sendJSON("/api/improvement/suggestions/generate", "POST");
+    showToast("Analysis complete", "ok");
+    await loadThinksView();
+  } catch {
+    showToast("Analysis failed", "err");
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = `<i class="ti ti-refresh" aria-hidden="true"></i> Refresh`;
+  }
+}
+
+$("thinks-refresh").onclick = () => generateThinks();
+
+$("thinks-cards").addEventListener("click", async (e) => {
+  const accept = e.target.closest(".thinks-accept");
+  const dismiss = e.target.closest(".thinks-dismiss");
+  const copyBtn = e.target.closest(".thinks-copy");
+  if (accept) {
+    await sendJSON(`/api/improvement/suggestions/${encodeURIComponent(accept.dataset.id)}/accept`, "POST");
+    showToast("Accepted", "ok");
+    loadThinksView();
+  } else if (dismiss) {
+    await sendJSON(`/api/improvement/suggestions/${encodeURIComponent(dismiss.dataset.id)}/dismiss`, "POST");
+    showToast("Dismissed", "info");
+    loadThinksView();
+  } else if (copyBtn) {
+    const card = copyBtn.closest(".thinks-card");
+    const pre = card?.querySelector(".thinks-change");
+    if (pre) {
+      await navigator.clipboard.writeText(pre.textContent || "");
+      showToast("Copied to clipboard", "ok");
+    }
+  }
+});
+
+setInterval(() => {
+  if ($("view-thinks")?.classList.contains("active")) loadThinksView();
+}, 30 * 60 * 1000);
 
 // ---- Keyboard shortcuts -------------------------------------------------
 document.addEventListener("keydown", (e) => {

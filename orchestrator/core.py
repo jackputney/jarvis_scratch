@@ -111,7 +111,13 @@ class Orchestrator:
 
     def cancel_current(self) -> None:
         """Stop the running turn and drop everything still queued."""
+        from improvement.trace import cancel_active_trace
+        from tts.router import stop_speech
+
         self._do_request_interrupt()
+        cancel_active_trace(interrupted=True)
+        stop_speech()
+        self._set_state("IDLE")
         emit: list[tuple[str, dict[str, Any]]] = []
         with self._cv:
             while self._queue:
@@ -344,19 +350,8 @@ class Orchestrator:
         }))
 
     def _set_state(self, name: str) -> None:
-        try:
-            import events
-
-            events.set_pipeline_state(name)
-        except Exception:  # noqa: BLE001
-            logger.debug("set_pipeline_state failed for %s", name, exc_info=True)
         self._emit("pipeline.state", state=name)
-        cb = self._ui_cb
-        if cb is not None:
-            try:
-                cb(name)
-            except Exception:  # noqa: BLE001
-                logger.debug("UI state callback failed for %s", name, exc_info=True)
+        # events.set_pipeline_state via bus subscriber (_sync_legacy in runtime).
 
     def _do_speak(self, text: str, cfg: Any) -> None:
         if self._speak is None:

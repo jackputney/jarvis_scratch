@@ -587,6 +587,8 @@ button.tiny { padding: 4px 9px; font-size: 12px; }
 
 .icon-btn.primary { background: linear-gradient(180deg, var(--accent-bright), var(--accent)); color: #0a0c12; border: 0; }
 .icon-btn.danger { background: rgba(248, 113, 113, 0.12); color: #fca5a5; border-color: rgba(248, 113, 113, 0.4); }
+.icon-btn.danger.stopping { opacity: 0.65; cursor: wait; animation: pulse-stop 0.8s ease-in-out infinite; }
+@keyframes pulse-stop { 0%, 100% { opacity: 0.65; } 50% { opacity: 1; } }
 .icon-btn:hover { filter: brightness(1.08); }
 
 .hidden { display: none !important; }
@@ -893,6 +895,25 @@ ul.notes li .title:hover { color: var(--accent-bright); }
 .hub-panel { display: none; }
 .hub-panel.active { display: block; }
 .hub-card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
+
+/* Jarvis Thinks */
+.thinks-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.thinks-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; margin-bottom: 18px; }
+.thinks-stat { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; }
+.thinks-stat .lbl { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin-bottom: 4px; }
+.thinks-stat .val { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.thinks-cards { display: flex; flex-direction: column; gap: 14px; }
+.thinks-card { padding: 16px 18px; }
+.thinks-card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
+.thinks-card-head h3 { margin: 0; font-size: 16px; flex: 1; }
+.thinks-sev { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; padding: 3px 8px; border-radius: 999px; border: 1px solid transparent; }
+.sev-critical { color: #fecaca; background: rgba(239, 68, 68, 0.18); border-color: rgba(239, 68, 68, 0.45); }
+.sev-high { color: #fed7aa; background: rgba(249, 115, 22, 0.16); border-color: rgba(249, 115, 22, 0.4); }
+.sev-medium { color: #fde68a; background: rgba(234, 179, 8, 0.14); border-color: rgba(234, 179, 8, 0.35); }
+.sev-low { color: var(--muted); background: rgba(148, 163, 184, 0.12); border-color: rgba(148, 163, 184, 0.3); }
+.thinks-body { margin: 0 0 10px; font-size: 13px; line-height: 1.55; color: var(--text-soft); }
+.thinks-change { margin: 0 0 12px; padding: 12px; background: rgba(0, 0, 0, 0.25); border: 1px solid var(--border); border-radius: 8px; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 12px; line-height: 1.45; white-space: pre-wrap; overflow-x: auto; }
+.thinks-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .hub-int-card {
   text-align: left;
   cursor: pointer;

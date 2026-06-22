@@ -34,6 +34,8 @@ _stt_stash_lock = threading.Lock()
 _stt_stash: dict[str, dict[str, Any]] = {}
 
 _active_trace: ContextVar["TurnTrace | None"] = ContextVar("active_turn_trace", default=None)
+_active_traces: list[TurnTrace] = []
+_active_traces_lock = threading.Lock()
 
 
 def _utc_now_iso() -> str:
@@ -92,6 +94,21 @@ def _ensure_writer() -> None:
                             """,
                             args,
                         )
+                    elif op == "suggestion":
+                        conn.execute(
+                            """
+                            INSERT INTO suggestions
+                            (id, created_at, title, body, category, severity,
+                             status, evidence_json, proposed_change)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            args,
+                        )
+                    elif op == "suggestion_status":
+                        conn.execute(
+                            "UPDATE suggestions SET status = ? WHERE id = ?",
+                            args,
+                        )
                     conn.commit()
                 except Exception as exc:  # noqa: BLE001
                     logger.error("⚠️  Improvement write failed (%s): %s", op, exc, exc_info=True)
@@ -141,6 +158,18 @@ def reset_writer_for_tests() -> None:
 
 def get_active_trace() -> TurnTrace | None:
     return _active_trace.get()
+
+
+def cancel_active_trace(*, interrupted: bool = False) -> None:
+    """Mark the in-flight turn as cancelled (Stop button / barge-in)."""
+    trace = get_active_trace()
+    if trace is None:
+        with _active_traces_lock:
+            if _active_traces:
+                trace = _active_traces[-1]
+    if trace is None:
+        return
+    trace.cancel(interrupted=interrupted)
 
 
 def stash_stt_metrics(
@@ -255,9 +284,16 @@ class TurnTrace:
 
     def __enter__(self) -> TurnTrace:
         self._token = _active_trace.set(self)
+        with _active_traces_lock:
+            _active_traces.append(self)
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
+        with _active_traces_lock:
+            try:
+                _active_traces.remove(self)
+            except ValueError:
+                pass
         if self._token is not None:
             _active_trace.reset(self._token)
             self._token = None
@@ -318,6 +354,13 @@ class TurnTrace:
         if cache is None:
             cache = getattr(usage, "cache_creation_input_tokens", None)
         self.cache_read_tokens = cache
+
+    def cancel(self, *, interrupted: bool = False) -> None:
+        """Mark this turn cancelled while still in flight."""
+        self.cancelled = True
+        if interrupted:
+            self.interrupted = True
+        self.queue_event("cancelled", {"interrupted": interrupted})
 
     def _apply_signal_detections(self) -> None:
         text = (self.stt_text or "").strip()

@@ -65,6 +65,8 @@ from voice.speech_state import (
 logger = logging.getLogger("jarvis.pipeline")
 
 _interrupt = threading.Event()
+_claude_future_lock = threading.Lock()
+_active_claude_future: Future[Any] | None = None
 # Set by the global hotkey handler to trigger an immediate listening turn.
 # Checked at the top of each pipeline idle loop iteration so it survives
 # across the finally-block clear of wake_event.
@@ -139,7 +141,13 @@ def request_interrupt() -> None:
     """Stop the current utterance and abandon the in-flight pipeline cycle."""
     _interrupt.set()
     stop_speech()
+    global _active_claude_future
+    with _claude_future_lock:
+        fut = _active_claude_future
+    if fut is not None and not fut.done():
+        fut.cancel()
     from tools import confirm as tool_confirm
+
     tool_confirm.cancel_pending()
     logger.info("⏹️  Stop requested — halting speech and resetting.")
 
@@ -950,36 +958,45 @@ def _call_claude(
             tools=TOOL_DEFINITIONS,
             messages=messages,
         )
-        while not future.done():
-            if _interrupt.is_set():
-                logger.info("⏹️  Stop during Claude — abandoning in-flight request.")
-                return "", model, total_cost, stream_spoken
-            time.sleep(0.05)
-
+        with _claude_future_lock:
+            global _active_claude_future
+            _active_claude_future = future
         try:
-            response = future.result()
-        except Exception as exc:  # noqa: BLE001
-            logger.error("⚠️  Claude API error: %s", exc, exc_info=True)
-            if _interrupt.is_set():
-                return "", model, total_cost, stream_spoken
-            if (
-                not switched_to_anthropic
-                and provider != "anthropic"
-                and (cfg.anthropic_api_key or "").strip()
-            ):
-                logger.warning(
-                    "⚠️  %s failed (%s) — retrying this turn on Anthropic.", provider, exc
-                )
-                on_smart_tier = model == smart_model
-                switched_to_anthropic = True
-                provider = "anthropic"
-                client = get_llm_client(
-                    cfg, timeout=CLAUDE_HTTP_TIMEOUT_SEC, provider="anthropic"
-                )
-                fast_model, smart_model = models_for("anthropic", cfg)
-                model = smart_model if on_smart_tier else fast_model
-                continue
-            return "Sorry, I couldn't reach my brain. Please try again.", model, total_cost, stream_spoken
+            while not future.done():
+                if _interrupt.is_set():
+                    logger.info("⏹️  Stop during Claude — abandoning in-flight request.")
+                    future.cancel()
+                    return "", model, total_cost, stream_spoken
+                time.sleep(0.05)
+
+            try:
+                response = future.result()
+            except Exception as exc:  # noqa: BLE001
+                logger.error("⚠️  Claude API error: %s", exc, exc_info=True)
+                if _interrupt.is_set():
+                    return "", model, total_cost, stream_spoken
+                if (
+                    not switched_to_anthropic
+                    and provider != "anthropic"
+                    and (cfg.anthropic_api_key or "").strip()
+                ):
+                    logger.warning(
+                        "⚠️  %s failed (%s) — retrying this turn on Anthropic.", provider, exc
+                    )
+                    on_smart_tier = model == smart_model
+                    switched_to_anthropic = True
+                    provider = "anthropic"
+                    client = get_llm_client(
+                        cfg, timeout=CLAUDE_HTTP_TIMEOUT_SEC, provider="anthropic"
+                    )
+                    fast_model, smart_model = models_for("anthropic", cfg)
+                    model = smart_model if on_smart_tier else fast_model
+                    continue
+                return "Sorry, I couldn't reach my brain. Please try again.", model, total_cost, stream_spoken
+        finally:
+            with _claude_future_lock:
+                if _active_claude_future is future:
+                    _active_claude_future = None
 
         if response is None:
             logger.info("⏹️  Claude stream cancelled — no tokens charged past cut-off.")
@@ -1253,14 +1270,11 @@ def run_pipeline(
     def set_state(name: str) -> None:
         events.set_pipeline_state(name)
         _sync_detection_pause(name, paused)
-        if state_callback:
-            state_callback(name)
 
     from orchestrator.runtime import get_orchestrator
     from orchestrator.types import Command, CommandSource
 
     orchestrator = get_orchestrator()
-    orchestrator.set_state_callback(state_callback)
 
     last_budget_level = ""
 
