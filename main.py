@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import platform
+import signal
 import sys
 import threading
 
@@ -221,6 +222,7 @@ def _print_banner(cfg: Config) -> None:
 
 def _run_with_ui(cfg: Config) -> None:
     """Start the face widget on the main thread, pipeline on a daemon thread."""
+    from PyQt6.QtCore import QTimer
     from PyQt6.QtWidgets import QApplication
     from ui.face import FaceWidget, JarvisState
     from pipeline import run_pipeline
@@ -243,6 +245,21 @@ def _run_with_ui(cfg: Config) -> None:
     _warmup_voice(cfg)
     _init_automation()
 
+    shutdown_done = False
+    shutdown_lock = threading.Lock()
+
+    def graceful_shutdown() -> None:
+        nonlocal shutdown_done
+        with shutdown_lock:
+            if shutdown_done:
+                return
+            shutdown_done = True
+        logger.info("👋 Shutting down Jarvis.")
+        stop_event.set()
+        face.shutdown()
+        if _scheduler is not None:
+            _scheduler.shutdown()
+
     def state_callback(state_name: str) -> None:
         try:
             state = JarvisState[state_name]
@@ -264,13 +281,21 @@ def _run_with_ui(cfg: Config) -> None:
     pipeline_thread.start()
     _start_hotkey(cfg)
 
-    try:
-        sys.exit(app.exec())
-    except SystemExit:
-        stop_event.set()
-        face.shutdown()
-        if _scheduler is not None:
-            _scheduler.shutdown()
+    def _handle_signal(_signum: int, _frame: object) -> None:
+        app.quit()
+
+    signal.signal(signal.SIGINT, _handle_signal)
+    signal.signal(signal.SIGTERM, _handle_signal)
+
+    # Let Python deliver SIGINT while Qt owns the main thread.
+    sig_wakeup = QTimer()
+    sig_wakeup.timeout.connect(lambda: None)
+    sig_wakeup.start(250)
+
+    app.aboutToQuit.connect(graceful_shutdown)
+    exit_code = app.exec()
+    graceful_shutdown()
+    sys.exit(exit_code)
 
 
 def _run_headless(cfg: Config) -> None:
