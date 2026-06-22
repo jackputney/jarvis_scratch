@@ -677,10 +677,15 @@ def warm_stt_caches() -> None:
 
 
 def _transcribe(audio_bytes: bytes, cfg: Config) -> str:
+    import time
+
     import numpy as np
 
     from adapters.stt import transcribe as stt_transcribe
+    from improvement.trace import get_active_trace, stash_stt_metrics
 
+    t0 = time.monotonic()
+    confidence: float | None = None
     audio_np = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
     raw = stt_transcribe(
         audio_np,
@@ -693,6 +698,13 @@ def _transcribe(audio_bytes: bytes, cfg: Config) -> str:
     if raw != text:
         logger.debug("📝 Raw transcript (pre-strip): %r", raw)
     logger.info("📝 Heard: %r", text)
+    stt_ms = int((time.monotonic() - t0) * 1000)
+    stash_stt_metrics(text, confidence=confidence, stt_ms=stt_ms)
+    active = get_active_trace()
+    if active is not None:
+        active.stt_text = text
+        active.stt_confidence = confidence
+        active.stt_ms = stt_ms
     return text
 
 
@@ -978,6 +990,11 @@ def _call_claude(
             return "", model, total_cost, stream_spoken
 
         total_cost += costs.log_usage(model, getattr(response, "usage", None), text)
+        from improvement.trace import get_active_trace
+
+        active = get_active_trace()
+        if active is not None:
+            active.apply_usage(getattr(response, "usage", None))
 
         reply_text = ""
         tool_uses: list[dict[str, Any]] = []
@@ -1014,13 +1031,33 @@ def _call_claude(
             if _interrupt.is_set():
                 logger.info("⏹️  Tool confirm skipped (interrupt).")
                 return reply_text.strip() or "Stopped.", model, total_cost, stream_spoken
-            result = dispatch_tool(
-                tu["name"],
-                tu["input"],
-                confirm=cfg.confirm_before_execute,
-                confirm_timeout_sec=cfg.confirm_timeout_sec,
-                cancel_check=interrupt_requested,
-            )
+            t_tool = time.monotonic()
+            tool_error: str | None = None
+            try:
+                result = dispatch_tool(
+                    tu["name"],
+                    tu["input"],
+                    confirm=cfg.confirm_before_execute,
+                    confirm_timeout_sec=cfg.confirm_timeout_sec,
+                    cancel_check=interrupt_requested,
+                )
+            except Exception as exc:  # noqa: BLE001
+                tool_error = str(exc)
+                result = f"Tool error: {exc}"
+            tool_ms = int((time.monotonic() - t_tool) * 1000)
+            from improvement.trace import get_active_trace, record_tool_call
+
+            active = get_active_trace()
+            if active is not None:
+                record_tool_call(
+                    active.turn_id,
+                    tu["name"],
+                    tu["input"] if isinstance(tu["input"], dict) else {"input": tu["input"]},
+                    result,
+                    tool_ms,
+                    error=tool_error,
+                )
+                active.add_tool_ms(tool_ms)
             if needs_confirm and not _interrupt.is_set():
                 _emit_pipeline_state("THINKING", on_state)
             logger.info("   → %s", result[:120])
@@ -1129,9 +1166,28 @@ def process_query(
         if cleaned_reply:
             events.record_conversation(text, cleaned_reply, model, latency_ms, cost)
         logger.info("💰 Call cost $%.4f (%dms) — %s", cost, latency_ms, model)
-        return {"reply": reply, "warning": warning, "capped": False, "busy": False,
-                "model": model, "latency_ms": latency_ms, "cost": cost,
-                "stream_spoken": stream_spoken}
+        from improvement.trace import get_active_trace
+
+        active = get_active_trace()
+        payload = {
+            "reply": reply,
+            "warning": warning,
+            "capped": False,
+            "busy": False,
+            "model": model,
+            "latency_ms": latency_ms,
+            "cost": cost,
+            "stream_spoken": stream_spoken,
+        }
+        if active is not None:
+            payload["tokens_in"] = active.tokens_in
+            payload["tokens_out"] = active.tokens_out
+            payload["cache_read_tokens"] = active.cache_read_tokens
+            if active.tts_ms is not None:
+                payload["tts_ms"] = active.tts_ms
+            if active.details.get("tts_provider"):
+                payload["tts_provider"] = active.details["tts_provider"]
+        return payload
     finally:
         _query_lock.release()
 

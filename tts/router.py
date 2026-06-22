@@ -49,6 +49,18 @@ def stop_speech() -> None:
     elevenlabs.stop()
 
 
+def _record_tts(provider: str, ms: int, *, fallback: dict | None = None) -> None:
+    from improvement.trace import get_active_trace, record_event
+
+    active = get_active_trace()
+    if active is None:
+        return
+    active.tts_ms = (active.tts_ms or 0) + ms
+    active.details["tts_provider"] = provider
+    if fallback:
+        record_event(active.turn_id, "tts_fallback", fallback)
+
+
 def _speak_with_cfg(
     text: str,
     cfg: Config,
@@ -57,10 +69,12 @@ def _speak_with_cfg(
     provider: str | None,
 ) -> None:
     chosen = _chosen_provider(cfg, provider)
+    t0 = time.monotonic()
 
     if chosen == "pyttsx3":
         logger.debug("🔊 TTS provider: pyttsx3 (local)")
         cartesia._speak_local(text)
+        _record_tts("pyttsx3", int((time.monotonic() - t0) * 1000))
         return
 
     if chosen == "cartesia":
@@ -70,6 +84,7 @@ def _speak_with_cfg(
             _resolve_cartesia_voice(voice_id, cfg),
             on_first_chunk=on_first_chunk,
         )
+        _record_tts("cartesia", int((time.monotonic() - t0) * 1000))
         return
 
     resolved_voice = _resolve_elevenlabs_voice(voice_id, cfg)
@@ -89,6 +104,7 @@ def _speak_with_cfg(
                 model_id=cfg.elevenlabs_model_id,
                 on_first_chunk=on_first_chunk,
             )
+            _record_tts("elevenlabs", int((time.monotonic() - t0) * 1000))
             return
         except TTSError as exc:
             last_exc = exc
@@ -98,10 +114,16 @@ def _speak_with_cfg(
         "ElevenLabs unavailable after retries (%s) — falling back to Cartesia",
         last_exc,
     )
+    fb_t0 = time.monotonic()
     cartesia.speak_cartesia(
         text,
         _resolve_cartesia_voice(None, cfg),
         on_first_chunk=on_first_chunk,
+    )
+    _record_tts(
+        "cartesia",
+        int((time.monotonic() - fb_t0) * 1000),
+        fallback={"from": "elevenlabs", "to": "cartesia", "reason": str(last_exc)[:200]},
     )
 
 

@@ -183,6 +183,29 @@ def create_app() -> Flask:
             "tools_today": costs.get_daily_tool_count(),
         })
 
+    @app.route("/api/improvement/turns")
+    def api_improvement_turns():  # noqa: ANN202
+        from improvement.stats import fetch_turns
+
+        limit = request.args.get("limit", 50, type=int)
+        session_id = request.args.get("session_id") or None
+        return jsonify({"turns": fetch_turns(limit=limit, session_id=session_id)})
+
+    @app.route("/api/improvement/events")
+    def api_improvement_events():  # noqa: ANN202
+        from improvement.stats import fetch_events
+
+        turn_id = request.args.get("turn_id", "").strip()
+        if not turn_id:
+            return jsonify({"error": "turn_id required"}), 400
+        return jsonify({"events": fetch_events(turn_id=turn_id)})
+
+    @app.route("/api/improvement/stats")
+    def api_improvement_stats():  # noqa: ANN202
+        from improvement.stats import compute_stats
+
+        return jsonify(compute_stats())
+
     # -- Real-time event stream (SSE) --------------------------------------
     @app.route("/api/events")
     def api_events():  # noqa: ANN202

@@ -26,7 +26,7 @@ from collections.abc import Callable
 from typing import Any
 
 from orchestrator.events import EventBus
-from orchestrator.types import Command, Job, JobState, SubmitResult
+from orchestrator.types import Command, CommandSource, Job, JobState, SubmitResult
 
 logger = logging.getLogger("jarvis.orchestrator")
 
@@ -163,6 +163,13 @@ class Orchestrator:
                    source=command.source.value)
         self._set_state("THINKING")
         cfg = self._config_loader() if self._config_loader else None
+
+        from improvement.trace import TurnTrace, ensure_session, pop_stt_metrics
+
+        session_id = ensure_session(model=getattr(cfg, "claude_model_fast", "") if cfg else "")
+        stt_meta = pop_stt_metrics(command.text)
+        trace_source = _trace_source(command.source)
+
         sentence_q: queue.Queue[str | None] | None = None
         tts_thread: threading.Thread | None = None
         tts_audio_started = False
@@ -173,77 +180,101 @@ class Orchestrator:
             and getattr(cfg, "streaming_tts", True)
         )
         try:
-            if use_stream_tts:
-                sentence_q = queue.Queue()
+            with TurnTrace(session_id=session_id, source=trace_source) as trace:
+                trace.stt_text = command.text
+                trace.stt_confidence = stt_meta.get("stt_confidence")
+                trace.stt_ms = stt_meta.get("stt_ms")
+                trace.wake_latency_ms = stt_meta.get("wake_latency_ms")
+                if use_stream_tts:
+                    sentence_q = queue.Queue()
 
-                def _sentence_iter():
-                    while True:
-                        item = sentence_q.get()
-                        if item is None:
-                            return
-                        yield item
+                    def _sentence_iter():
+                        while True:
+                            item = sentence_q.get()
+                            if item is None:
+                                return
+                            yield item
 
-                def _mark_speaking() -> None:
-                    nonlocal tts_audio_started
-                    tts_audio_started = True
-                    self._set_state("SPEAKING")
+                    def _mark_speaking() -> None:
+                        nonlocal tts_audio_started
+                        tts_audio_started = True
+                        self._set_state("SPEAKING")
 
-                def _run_stream_tts() -> None:
-                    from tts.router import speak_stream
+                    def _run_stream_tts() -> None:
+                        from tts.router import speak_stream
 
-                    speak_stream(
-                        _sentence_iter(),
-                        voice_id=None,
-                        on_first_chunk=_mark_speaking,
+                        speak_stream(
+                            _sentence_iter(),
+                            voice_id=None,
+                            on_first_chunk=_mark_speaking,
+                        )
+
+                    tts_thread = threading.Thread(
+                        target=_run_stream_tts,
+                        daemon=True,
+                        name="jarvis-tts-stream",
                     )
+                    tts_thread.start()
+                    result = self._process_query(
+                        command.text,
+                        cfg,
+                        on_state=self._set_state,
+                        speak=False,
+                        on_sentence=sentence_q.put,
+                    )
+                else:
+                    result = self._process_query(
+                        command.text, cfg, on_state=self._set_state, speak=command.speak,
+                    )
+                job.reply = result.get("reply", "")
+                job.warning = result.get("warning")
+                job.model = result.get("model")
+                job.capped = bool(result.get("capped", False))
+                job.latency_ms = int(result.get("latency_ms", 0) or 0)
+                job.cost = float(result.get("cost", 0.0) or 0.0)
+                trace.model = job.model or ""
+                trace.llm_ms = job.latency_ms
+                trace.tokens_in = result.get("tokens_in")
+                trace.tokens_out = result.get("tokens_out")
+                trace.cache_read_tokens = result.get("cache_read_tokens")
+                if result.get("tts_provider"):
+                    trace.details["tts_provider"] = result["tts_provider"]
+                if result.get("tts_ms") is not None:
+                    trace.tts_ms = int(result["tts_ms"])
+                if result.get("busy"):
+                    job.state, job.error = JobState.FAILED, "busy"
+                elif self._interrupt_set():
+                    job.state = JobState.CANCELLED
+                    trace.cancelled = True
+                    import events
 
-                tts_thread = threading.Thread(
-                    target=_run_stream_tts,
-                    daemon=True,
-                    name="jarvis-tts-stream",
-                )
-                tts_thread.start()
-                result = self._process_query(
-                    command.text,
-                    cfg,
-                    on_state=self._set_state,
-                    speak=False,
-                    on_sentence=sentence_q.put,
-                )
-            else:
-                result = self._process_query(
-                    command.text, cfg, on_state=self._set_state, speak=command.speak,
-                )
-            job.reply = result.get("reply", "")
-            job.warning = result.get("warning")
-            job.model = result.get("model")
-            job.capped = bool(result.get("capped", False))
-            job.latency_ms = int(result.get("latency_ms", 0) or 0)
-            job.cost = float(result.get("cost", 0.0) or 0.0)
-            if result.get("busy"):
-                job.state, job.error = JobState.FAILED, "busy"
-            elif self._interrupt_set():
-                job.state = JobState.CANCELLED
-            else:
-                job.state = JobState.DONE
+                    if events.get_state().get("pipeline_state") == "SPEAKING":
+                        trace.interrupted = True
+                else:
+                    job.state = JobState.DONE
 
-            if job.reply.strip():
-                self._emit("job.transcript", job_id=command.id, heard=command.text,
-                           reply=job.reply, model=job.model, state=job.state.value)
-            elif command.source == CommandSource.SCHEDULE:
-                logger.debug("Empty reply from scheduled plugin — no TTS.")
+                if job.reply.strip():
+                    self._emit("job.transcript", job_id=command.id, heard=command.text,
+                               reply=job.reply, model=job.model, state=job.state.value)
+                elif command.source == CommandSource.SCHEDULE:
+                    logger.debug("Empty reply from scheduled plugin — no TTS.")
 
-            speakable = (
-                command.speak
-                and bool(job.reply.strip())
-                and job.state in (JobState.DONE, JobState.FAILED)
-                and not self._interrupt_set()
-                and not bool(result.get("stream_spoken"))
-            )
-            if speakable:
-                spoken = f"{job.warning} {job.reply}" if job.warning else job.reply
-                self._set_state("SPEAKING")
-                self._do_speak(spoken, cfg)
+                speakable = (
+                    command.speak
+                    and bool(job.reply.strip())
+                    and job.state in (JobState.DONE, JobState.FAILED)
+                    and not self._interrupt_set()
+                    and not bool(result.get("stream_spoken"))
+                )
+                if speakable:
+                    spoken = f"{job.warning} {job.reply}" if job.warning else job.reply
+                    self._set_state("SPEAKING")
+                    t0 = time.monotonic()
+                    self._do_speak(spoken, cfg)
+                    if trace.tts_ms is None:
+                        trace.tts_ms = int((time.monotonic() - t0) * 1000)
+                    if self._interrupt_set():
+                        trace.interrupted = True
         except Exception as exc:  # noqa: BLE001
             logger.error("⚠️  Job %s failed: %s", command.id, exc, exc_info=True)
             job.state = JobState.FAILED
@@ -365,3 +396,13 @@ class Orchestrator:
         import pipeline
 
         pipeline._clear_interrupt()
+
+
+def _trace_source(source: CommandSource) -> str:
+    if source == CommandSource.VOICE:
+        return "voice"
+    if source == CommandSource.DASHBOARD:
+        return "dashboard"
+    if source in (CommandSource.SCHEDULE, CommandSource.PLUGIN, CommandSource.WEBHOOK):
+        return "plugin"
+    return source.value

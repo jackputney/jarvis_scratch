@@ -71,6 +71,79 @@ def init_db() -> None:
                     result TEXT,
                     ok INTEGER NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS sessions (
+                    session_id TEXT PRIMARY KEY,
+                    started_at TEXT NOT NULL,
+                    platform TEXT,
+                    app_version TEXT,
+                    model TEXT
+                );
+                CREATE TABLE IF NOT EXISTS turns (
+                    turn_id TEXT PRIMARY KEY,
+                    session_id TEXT,
+                    ts TEXT NOT NULL,
+                    source TEXT,
+                    wake_latency_ms INTEGER,
+                    stt_text TEXT,
+                    stt_confidence REAL,
+                    stt_ms INTEGER,
+                    llm_ms INTEGER,
+                    tool_ms INTEGER,
+                    tts_ms INTEGER,
+                    total_ms INTEGER,
+                    model TEXT,
+                    tokens_in INTEGER,
+                    tokens_out INTEGER,
+                    cache_read_tokens INTEGER,
+                    interrupted INTEGER DEFAULT 0,
+                    cancelled INTEGER DEFAULT 0,
+                    details_json TEXT
+                );
+                CREATE TABLE IF NOT EXISTS events (
+                    event_id TEXT PRIMARY KEY,
+                    turn_id TEXT,
+                    ts TEXT NOT NULL,
+                    type TEXT NOT NULL,
+                    payload_json TEXT
+                );
+                CREATE TABLE IF NOT EXISTS corrections (
+                    correction_id TEXT PRIMARY KEY,
+                    turn_id TEXT,
+                    prev_turn_id TEXT,
+                    kind TEXT
+                );
+                CREATE TABLE IF NOT EXISTS lessons (
+                    id TEXT PRIMARY KEY,
+                    created_at TEXT NOT NULL,
+                    category TEXT,
+                    text TEXT,
+                    status TEXT DEFAULT 'pending',
+                    evidence_turn_ids TEXT,
+                    votes INTEGER DEFAULT 0
+                );
+                CREATE TABLE IF NOT EXISTS suggestions (
+                    id TEXT PRIMARY KEY,
+                    created_at TEXT NOT NULL,
+                    title TEXT,
+                    body TEXT,
+                    category TEXT,
+                    severity TEXT,
+                    status TEXT DEFAULT 'pending',
+                    evidence_json TEXT,
+                    proposed_change TEXT
+                );
+                CREATE TABLE IF NOT EXISTS baselines (
+                    id TEXT PRIMARY KEY,
+                    created_at TEXT NOT NULL,
+                    metric TEXT,
+                    p50 REAL,
+                    p95 REAL,
+                    p99 REAL,
+                    value REAL
+                );
+                CREATE INDEX IF NOT EXISTS idx_turns_session_ts ON turns(session_id, ts);
+                CREATE INDEX IF NOT EXISTS idx_events_turn_id ON events(turn_id);
+                CREATE INDEX IF NOT EXISTS idx_events_type ON events(type);
                 """
             )
             conn.commit()
@@ -92,6 +165,20 @@ def enforce_retention(retention_days: int = 90) -> None:
         conn.execute(
             "DELETE FROM tool_runs WHERE timestamp < datetime('now', ?)",
             (f"-{days} days",),
+        )
+        conn.execute(
+            "DELETE FROM events WHERE ts < datetime('now', ?)",
+            (f"-{days} days",),
+        )
+        conn.execute(
+            "DELETE FROM turns WHERE ts < datetime('now', ?)",
+            (f"-{days} days",),
+        )
+        conn.execute(
+            "DELETE FROM corrections WHERE correction_id IN ("
+            "SELECT correction_id FROM corrections c "
+            "LEFT JOIN turns t ON c.turn_id = t.turn_id WHERE t.turn_id IS NULL"
+            ")",
         )
         conn.commit()
 
