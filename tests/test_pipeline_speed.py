@@ -123,3 +123,75 @@ def test_call_claude_escalates_model(monkeypatch, temp_env):
     assert calls == ["claude-haiku-4-5", "claude-sonnet-4-6"]
     assert model == "claude-sonnet-4-6"
     assert reply == "Deep answer."
+
+
+def test_call_claude_falls_back_to_anthropic_on_provider_error(monkeypatch, temp_env):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    pipeline._interrupt.clear()
+
+    class AnswerBlock:
+        type = "text"
+        text = "Anthropic answer."
+
+    class FinalResponse:
+        content = [AnswerBlock()]
+        usage = None
+
+    class FakeStream:
+        def __init__(self, final):
+            self._final = final
+
+        @property
+        def text_stream(self):
+            return iter([])
+
+        def get_final_message(self):
+            return self._final
+
+    class FakeCM:
+        def __init__(self, final):
+            self._stream = FakeStream(final)
+
+        def __enter__(self):
+            return self._stream
+
+        def __exit__(self, *exc):
+            return False
+
+    class FailingGeminiMessages:
+        def stream(self, **kwargs):
+            raise RuntimeError("rate limit exceeded")
+
+    class FailingGeminiClient:
+        messages = FailingGeminiMessages()
+
+    class AnthropicMessages:
+        def stream(self, **kwargs):
+            return FakeCM(FinalResponse())
+
+    class AnthropicClient:
+        messages = AnthropicMessages()
+
+    def fake_get_llm_client(cfg, timeout=60.0, provider=None):
+        if provider == "gemini":
+            return FailingGeminiClient()
+        return AnthropicClient()
+
+    monkeypatch.setattr("llm.get_llm_client", fake_get_llm_client)
+    monkeypatch.setattr(
+        "llm.router.resolve_models",
+        lambda text, cfg: ("gemini", "gemini-2.5-flash", "gemini-2.5-pro"),
+    )
+
+    from config import Config
+
+    cfg = Config(
+        llm_provider="auto",
+        anthropic_api_key="test-key",
+        gemini_api_key="gemini-key",
+        claude_model_fast="claude-haiku-4-5",
+        claude_model_smart="claude-sonnet-4-6",
+    )
+    reply, model, _cost, _spoken = pipeline._call_claude("what time is it", cfg)
+    assert reply == "Anthropic answer."
+    assert model == "claude-haiku-4-5"

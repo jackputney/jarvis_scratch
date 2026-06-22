@@ -206,6 +206,24 @@ def _print_banner(cfg: Config) -> None:
         print(f"   ⌨️  Global hotkey  : {cfg.hotkey_combo}")
     print(f"   🧠 Models         : {cfg.claude_model_fast} (fast) / {cfg.claude_model_smart} (smart)")
     print(f"   🎧 Whisper        : {cfg.stt_model} ({resolved_stt})")
+    from tts.router import effective_tts_provider
+
+    tts = effective_tts_provider(cfg)
+    if cfg.tts_provider == "elevenlabs" and tts != "elevenlabs":
+        print(
+            f"   🔊 Voice (TTS)    : {tts} (ElevenLabs selected but ELEVENLABS_API_KEY missing — "
+            "add it to .env or pick Cartesia in Settings)"
+        )
+    elif tts == "elevenlabs":
+        from config import ELEVENLABS_VOICES
+
+        name = next(
+            (v["name"] for v in ELEVENLABS_VOICES if v["id"] == cfg.elevenlabs_voice_id),
+            cfg.elevenlabs_voice_id[:8],
+        )
+        print(f"   🔊 Voice (TTS)    : ElevenLabs · {name}")
+    else:
+        print(f"   🔊 Voice (TTS)    : {tts}")
     print(f"   💰 Budget         : ${cfg.daily_budget_usd:.2f}/day · ${cfg.monthly_budget_usd:.2f}/month")
     from memory import store
 

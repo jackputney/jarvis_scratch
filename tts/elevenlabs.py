@@ -9,6 +9,7 @@ from collections.abc import Callable, Iterator
 from tts.cartesia import (
     _cancel,
     _play_pcm_stream,
+    _silence_pcm,
     _trailing_silence_ms,
     stop_speech as cartesia_stop_speech,
 )
@@ -21,6 +22,19 @@ DEFAULT_VOICE = "JBFqnCBsd6RMkjVDRZzb"
 # pcm_44100 requires ElevenLabs Pro; pcm_16000 works on free/starter tiers.
 ELEVENLABS_SAMPLE_RATE = 16000
 OUTPUT_FORMAT = "pcm_16000"
+
+
+def _tts_error_from_exc(exc: Exception) -> TTSError:
+    """Build a TTSError message that includes HTTP status when the SDK exposes it."""
+    status = getattr(exc, "status_code", None)
+    if status is None:
+        status = getattr(exc, "status", None)
+    body = str(exc).strip()
+    if status is not None:
+        msg = f"ElevenLabs API error {status}: {body}" if body else f"ElevenLabs API error {status}"
+    else:
+        msg = body or repr(exc)
+    return TTSError(msg)
 
 
 def _api_key() -> str:
@@ -55,7 +69,7 @@ def _iter_elevenlabs_audio(
         if chunk:
             yield chunk
     if not _cancel.is_set():
-        yield _silence_pcm_ms(_trailing_silence_ms(), ELEVENLABS_SAMPLE_RATE)
+        yield _silence_pcm(_trailing_silence_ms(), sample_rate=ELEVENLABS_SAMPLE_RATE)
 
 
 def _iter_elevenlabs_stream(
@@ -96,7 +110,7 @@ def speak(
     except TTSError:
         raise
     except Exception as exc:  # noqa: BLE001
-        raise TTSError(str(exc)) from exc
+        raise _tts_error_from_exc(exc) from exc
 
 
 def speak_stream(
@@ -120,7 +134,7 @@ def speak_stream(
     except TTSError:
         raise
     except Exception as exc:  # noqa: BLE001
-        raise TTSError(str(exc)) from exc
+        raise _tts_error_from_exc(exc) from exc
 
 
 def stop() -> None:

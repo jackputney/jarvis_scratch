@@ -47,7 +47,7 @@ def open_app(app_name: str) -> str:
         if system == "Darwin":
             cmd = ["open", "-a", safe_name]
         elif system == "Windows":
-            cmd = ["cmd", "/c", "start", "", safe_name]
+            cmd = ["powershell", "-NoProfile", "-Command", "Start-Process", safe_name]
         else:
             cmd = ["xdg-open", safe_name]
         result = subprocess.run(

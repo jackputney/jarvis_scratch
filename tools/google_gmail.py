@@ -213,6 +213,10 @@ def draft_email_reply(
 
 def send_email(to: str, subject: str, body: str) -> str:
     """Send a plain-text email from the authenticated account."""
+    if not (subject or "").strip():
+        first_line = (body or "").strip().splitlines()[0] if (body or "").strip() else ""
+        words = first_line.split()
+        subject = " ".join(words[:6]) if words else "(no subject)"
     to = (to or "").strip()
     if not to:
         return "Recipient address is required."

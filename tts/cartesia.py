@@ -78,15 +78,15 @@ class _OutputStream:
     """
 
     def __init__(self, sample_rate: int = SAMPLE_RATE) -> None:
-        self._sample_rate = sample_rate
         self._sd = None
         self._pa_stream = None
+        write_frames = int(sample_rate * 0.02)
         try:
             import sounddevice as sd
 
             self._sd = sd.RawOutputStream(
                 samplerate=sample_rate, channels=CHANNELS, dtype="int16",
-                blocksize=WRITE_FRAMES,
+                blocksize=write_frames,
             )
             self._sd.start()
         except Exception:  # noqa: BLE001 — fall back to PyAudio if sounddevice fails
@@ -95,7 +95,7 @@ class _OutputStream:
                 raise RuntimeError("no audio output backend (install sounddevice or pyaudio)")
             self._pa_stream = _pa.open(
                 format=PA_FORMAT, channels=CHANNELS, rate=sample_rate,
-                output=True, frames_per_buffer=WRITE_FRAMES,
+                output=True, frames_per_buffer=write_frames,
             )
             self._pa_stream.start_stream()
 
@@ -155,9 +155,9 @@ def _trailing_silence_ms() -> int:
         return DEFAULT_TRAILING_SILENCE_MS
 
 
-def _silence_pcm(ms: int | None = None) -> bytes:
+def _silence_pcm(ms: int | None = None, *, sample_rate: int = SAMPLE_RATE) -> bytes:
     duration = DEFAULT_TRAILING_SILENCE_MS if ms is None else max(0, ms)
-    nbytes = int(SAMPLE_RATE * SAMPLE_WIDTH * duration / 1000)
+    nbytes = int(sample_rate * SAMPLE_WIDTH * duration / 1000)
     nbytes -= nbytes % FRAME_BYTES
     return b"\x00" * nbytes
 
@@ -182,8 +182,10 @@ def _play_pcm_stream(
     sample_rate: int = SAMPLE_RATE,
 ) -> None:
     """Play a stream of s16le mono PCM at sample_rate (sounddevice or PyAudio)."""
+    write_frames = int(sample_rate * 0.02)
+    write_bytes = write_frames * FRAME_BYTES
+    prebuffer_bytes = int(sample_rate * SAMPLE_WIDTH * 0.07)
     audio_q: queue.Queue[bytes | None | Exception] = queue.Queue(maxsize=64)
-    prebuffer_bytes = int(sample_rate * SAMPLE_WIDTH * 0.12)
 
     def _producer() -> None:
         try:
@@ -227,11 +229,11 @@ def _play_pcm_stream(
             if not playback_started:
                 continue
 
-            while len(buffer) >= WRITE_BYTES:
+            while len(buffer) >= write_bytes:
                 if _cancel.is_set():
                     break
-                frame = bytes(buffer[:WRITE_BYTES])
-                del buffer[:WRITE_BYTES]
+                frame = bytes(buffer[:write_bytes])
+                del buffer[:write_bytes]
                 if first_audio:
                     first_audio = False
                     if on_first_chunk:

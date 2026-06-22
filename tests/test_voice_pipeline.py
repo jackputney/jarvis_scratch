@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import inspect
+import queue
 import threading
 
 import events
 from config import Config
 from pipeline import (
+    MAX_FOLLOWUP_MISSES,
     _answer_wait_frames,
+    _await_followup_utterance,
     _followup_wait_frames,
     _ensure_wake_model,
+    _is_end_phrase,
     wake_detection_paused,
     FRAME_DURATION_MS,
 )
@@ -21,8 +25,8 @@ def test_config_voice_tuning_defaults():
     cfg = Config()
     assert cfg.barge_in_threshold == 0.48
     assert cfg.barge_in_hits == 2
-    assert cfg.followup_listen_sec == 5
-    assert cfg.followup_vad_silence_ms == 600
+    assert cfg.followup_listen_sec == 10
+    assert cfg.followup_vad_silence_ms == 1100
     assert cfg.tts_trailing_silence_ms == 80
 
 
@@ -135,3 +139,104 @@ def test_ensure_wake_model_raises_clearly_when_offline(monkeypatch):
 
     with pytest.raises(RuntimeError, match="Could not download"):
         pipeline._ensure_wake_model("hey_jarvis")
+
+
+def test_is_end_phrase():
+    assert _is_end_phrase("that's all")
+    assert _is_end_phrase("Thanks Jarvis!")
+    assert _is_end_phrase("we're done")
+    assert _is_end_phrase("that's all for now")
+    assert not _is_end_phrase("open Spotify")
+    assert not _is_end_phrase("that's all the apps")
+
+
+def test_await_followup_utterance_succeeds_on_first_try(monkeypatch):
+    pipeline = __import__("pipeline")
+    pipeline._interrupt.clear()
+    calls: list[int] = []
+
+    def fake_capture(*_a, **_k):
+        calls.append(1)
+        return "follow up question"
+
+    monkeypatch.setattr(pipeline, "_capture_and_transcribe", fake_capture)
+    cfg = Config()
+    q: queue.Queue[bytes] = queue.Queue()
+    capturing = threading.Event()
+    paused = threading.Event()
+    wake = threading.Event()
+    states: list[str] = []
+
+    text = _await_followup_utterance(
+        q, capturing, paused, cfg, states.append, wake, max_misses=3,
+    )
+    assert text == "follow up question"
+    assert calls == [1]
+
+
+def test_await_followup_utterance_forgives_transient_misses(monkeypatch):
+    pipeline = __import__("pipeline")
+    pipeline._interrupt.clear()
+    results = [None, None, "third time's the charm"]
+
+    def fake_capture(*_a, **_k):
+        return results.pop(0)
+
+    monkeypatch.setattr(pipeline, "_capture_and_transcribe", fake_capture)
+    cfg = Config()
+    q: queue.Queue[bytes] = queue.Queue()
+    capturing = threading.Event()
+    paused = threading.Event()
+    wake = threading.Event()
+
+    text = _await_followup_utterance(
+        q, capturing, paused, cfg, lambda _s: None, wake, max_misses=3,
+    )
+    assert text == "third time's the charm"
+    assert len(results) == 0
+
+
+def test_await_followup_utterance_exits_after_max_misses(monkeypatch):
+    pipeline = __import__("pipeline")
+    pipeline._interrupt.clear()
+    calls: list[int] = []
+
+    def fake_capture(*_a, **_k):
+        calls.append(1)
+        return None
+
+    monkeypatch.setattr(pipeline, "_capture_and_transcribe", fake_capture)
+    cfg = Config()
+    q: queue.Queue[bytes] = queue.Queue()
+    capturing = threading.Event()
+    paused = threading.Event()
+    wake = threading.Event()
+
+    text = _await_followup_utterance(
+        q, capturing, paused, cfg, lambda _s: None, wake, max_misses=MAX_FOLLOWUP_MISSES,
+    )
+    assert text is None
+    assert len(calls) == MAX_FOLLOWUP_MISSES
+
+
+def test_await_followup_utterance_end_phrase(monkeypatch):
+    pipeline = __import__("pipeline")
+    pipeline._interrupt.clear()
+    spoken: list[str] = []
+    states: list[str] = []
+
+    monkeypatch.setattr(pipeline, "_capture_and_transcribe", lambda *_a, **_k: "that's all")
+    monkeypatch.setattr(pipeline, "speak", lambda msg: spoken.append(msg))
+
+    cfg = Config()
+    q: queue.Queue[bytes] = queue.Queue()
+    capturing = threading.Event()
+    paused = threading.Event()
+    wake = threading.Event()
+
+    text = _await_followup_utterance(
+        q, capturing, paused, cfg, states.append, wake, max_misses=3,
+    )
+    assert text is None
+    assert spoken == ["Okay."]
+    assert states[-1] == "IDLE"

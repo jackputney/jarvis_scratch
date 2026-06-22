@@ -84,6 +84,18 @@ def test_open_app_uses_open_cli(monkeypatch):
     assert calls == [["open", "-a", "Safari"]]
 
 
+def test_open_app_uses_powershell_on_windows(monkeypatch):
+    calls: list[list[str]] = []
+    monkeypatch.setattr("tools.system.platform.system", lambda: "Windows")
+    monkeypatch.setattr(
+        "tools.system.subprocess.run",
+        lambda cmd, **kw: calls.append(cmd) or type("R", (), {"returncode": 0, "stderr": "", "stdout": ""})(),
+    )
+    out = open_app("Spotify")
+    assert "Opened" in out
+    assert calls == [["powershell", "-NoProfile", "-Command", "Start-Process", "Spotify"]]
+
+
 def test_send_email_rejects_invalid_address():
     out = send_email("not-an-email", "hi", "body")
     assert "Invalid email" in out

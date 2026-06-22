@@ -14,7 +14,11 @@ if (-not (Test-Path ".venv")) {
 }
 
 . .venv\Scripts\Activate.ps1
+$env:PYTHONUTF8 = "1"
 pip install -q -r requirements.txt
+if ($LASTEXITCODE -ne 0) {
+    Write-Warning "Some pip packages failed (often PyAudio/webrtcvad on Windows). Jarvis may still run via sounddevice."
+}
 
 if (Test-Path ".env") {
     Get-Content .env | ForEach-Object {

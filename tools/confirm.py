@@ -86,6 +86,20 @@ def wait_for_confirm(
     with _lock:
         _pending = entry
 
+    try:
+        from orchestrator.runtime import get_bus
+        get_bus().emit(
+            "confirm.pending",
+            type="confirm",
+            id=confirm_id,
+            tool=tool,
+            inputs=inputs,
+            age_sec=0.0,
+            timeout_sec=timeout_sec,
+        )
+    except Exception:
+        pass  # dashboard not running / bus unavailable — catch-up path still covers new clients
+
     deadline = time.time() + timeout_sec
     try:
         while time.time() < deadline:

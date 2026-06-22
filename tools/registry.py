@@ -67,13 +67,21 @@ from tools.web import web_search
 TOOL_DEFINITIONS: list[dict] = [
     {
         "name": "open_app",
-        "description": "Open an application by name (macOS, Windows, or Linux).",
+        "description": (
+            "Open or launch a desktop application by name (macOS, Windows, or Linux). "
+            "Call this whenever the user asks to open, launch, or start an app — e.g. Spotify, "
+            "Chrome, Notepad, Safari. Never tell the user an app is not installed without "
+            "calling this tool first."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "app_name": {
                     "type": "string",
-                    "description": "The application name as it appears in /Applications, e.g. 'Safari'.",
+                    "description": (
+                        "Application name as shown in the Start menu or launcher — "
+                        "e.g. 'Spotify', 'Chrome', 'Notepad', 'Safari'."
+                    ),
                 },
             },
             "required": ["app_name"],
@@ -281,7 +289,7 @@ TOOL_DEFINITIONS: list[dict] = [
     },
     {
         "name": "open_photos",
-        "description": "Open the macOS Photos app.",
+        "description": "Open the Photos app (macOS only).",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -292,7 +300,7 @@ TOOL_DEFINITIONS: list[dict] = [
     },
     {
         "name": "open_podcasts",
-        "description": "Open the macOS Podcasts app.",
+        "description": "Open the Podcasts app (macOS only).",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -541,7 +549,7 @@ TOOL_DEFINITIONS: list[dict] = [
     },
     {
         "name": "send_email",
-        "description": "Send a plain-text email via Gmail. Requires user confirmation.",
+        "description": "Send a plain-text email via Gmail. The user gives only a recipient and the gist — infer a short subject yourself and draft the body from their intent. Never ask the user for a subject line or to dictate the body verbatim. Requires user confirmation.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -549,7 +557,7 @@ TOOL_DEFINITIONS: list[dict] = [
                 "subject": {"type": "string", "description": "Email subject line."},
                 "body": {"type": "string", "description": "Plain-text email body."},
             },
-            "required": ["to", "subject", "body"],
+            "required": ["to"],
         },
     },
     {
@@ -779,7 +787,7 @@ TOOL_DISPATCH: dict[str, callable] = {
     "search_emails": lambda **kw: search_emails(
         kw["query"], kw.get("max_results", 5),
     ),
-    "send_email": lambda **kw: send_email(kw["to"], kw["subject"], kw["body"]),
+    "send_email": lambda **kw: send_email(kw["to"], kw.get("subject", ""), kw.get("body", "")),
     "read_sheet": lambda **kw: read_sheet(kw["spreadsheet_id"], kw["range"]),
     "append_row": lambda **kw: append_row(kw["spreadsheet_id"], kw["sheet_name"], kw["values"]),
     "update_cell": lambda **kw: update_cell(kw["spreadsheet_id"], kw["cell"], kw["value"]),

@@ -101,12 +101,18 @@ ENERGY_VAD_THRESHOLD = 250
 HOTWORDS_TTL_SECONDS = 600
 
 STATIC_SYSTEM_INSTRUCTIONS = (
-    "You are Jarvis, a fast personal AI assistant. You are direct, honest, and never "
-    "flatter. You flag uncertainty rather than guessing. You have access to tools — use "
-    "them when the task requires it, not otherwise. Keep spoken responses concise (under "
-    "40 words for simple questions). Recent message history may appear before the latest "
-    "user turn — use it for follow-ups. When the user shares durable personal facts "
-    "(preferences, relationships, routines, goals), persist them with remember, "
+    "You are Jarvis, a sharp, warm personal voice assistant — not a chatbot. Your replies "
+    "are spoken aloud, so write for the ear: natural, conversational sentences, no markdown, "
+    "no bullet points, no numbered lists, no headings. Be concise (usually under 40 words for "
+    "simple things) and get to the point without restating the user's question back to them. "
+    "Infer missing details from context instead of interrogating the user; ask at most one "
+    "clarifying question, and only when you genuinely cannot proceed. Don't flatter or hedge "
+    "with filler. Flag real uncertainty plainly. For email and messages, the user gives only "
+    "the recipient and the gist — infer a short subject, draft the message yourself, then "
+    "confirm once before sending; never ask them to dictate a subject line or spell out a "
+    "body. You have tools — use them when the task needs it. Recent message history may appear "
+    "before the latest turn; use it for follow-ups. When the user shares durable personal "
+    "facts (preferences, relationships, routines, goals), persist them with remember, "
     "set_variable, or write_note so future turns stay personalised.\n\n"
     "## When to escalate\n"
     "You start on the fast model. If a request needs careful multi-step reasoning, "
@@ -238,8 +244,29 @@ def _followup_wait_frames(cfg: Config) -> int:
     return int(sec * 1000 / FRAME_DURATION_MS)
 
 
+def _conversation_idle_wait_frames(cfg: Config) -> int:
+    sec = max(2, int(getattr(cfg, "conversation_idle_timeout_sec", 20) or 20))
+    return int(sec * 1000 / FRAME_DURATION_MS)
+
+
 def _answer_wait_frames(cfg: Config) -> int:
     return max(_followup_wait_frames(cfg), ANSWER_WAIT_FRAMES)
+
+
+_END_PHRASES = (
+    "that's all", "thats all", "that's it", "thats it", "that's everything",
+    "that's all for now", "thats all for now",
+    "thank you jarvis", "thanks jarvis", "goodbye", "bye jarvis",
+    "never mind", "nevermind", "nothing else", "i'm done", "im done", "we're done", "were done",
+    "that'll be all",
+)
+
+MAX_FOLLOWUP_MISSES = 3
+
+
+def _is_end_phrase(text: str) -> bool:
+    t = (text or "").strip().lower().rstrip(".!? ")
+    return any(t == p or t.endswith(" " + p) for p in _END_PHRASES)
 
 
 def _reset_audio_for_followup(
@@ -253,6 +280,48 @@ def _reset_audio_for_followup(
     capturing.clear()
     paused.clear()
     _drain_queue(capture_queue)
+
+
+def _await_followup_utterance(
+    capture_queue: "queue.Queue[bytes]",
+    capturing: threading.Event,
+    paused: threading.Event,
+    cfg: Config,
+    set_state: Callable[[str], None],
+    wake_event: threading.Event,
+    *,
+    max_misses: int = MAX_FOLLOWUP_MISSES,
+) -> str | None:
+    """Listen for a follow-up; tolerate consecutive empty STT results before giving up."""
+    misses = 0
+    while misses < max_misses and not _interrupt.is_set():
+        _reset_audio_for_followup(wake_event, capture_queue, capturing, paused)
+        if misses == 0:
+            transition(set_state, SpeechPhase.FOLLOWUP_WINDOW, reason="follow-up")
+            logger.info("👂 Listening for follow-up…")
+        else:
+            logger.info("👂 Didn't catch that — still listening…")
+        followup_frames = _followup_wait_frames(cfg)
+        text = _capture_and_transcribe(
+            capture_queue,
+            capturing,
+            paused,
+            cfg,
+            set_state,
+            wait_for_speech_frames=followup_frames,
+            silence_ms=cfg.followup_vad_silence_ms,
+            min_capture_ms=cfg.followup_vad_min_capture_ms,
+        )
+        if _interrupt.is_set():
+            return None
+        if text is not None:
+            if _is_end_phrase(text):
+                speak("Okay.")
+                set_state("IDLE")
+                return None
+            return text
+        misses += 1
+    return None
 
 
 def _reset_oww(model: Any) -> None:
@@ -718,11 +787,30 @@ def warmup_stt(cfg: Config) -> None:
 
 def _build_system_blocks(cfg: Config, query_text: str = "") -> list[dict[str, Any]]:
     """System prompt split into a cacheable static block and dynamic user context."""
+    import platform
+
+    _os = {"Darwin": "macOS", "Windows": "Windows", "Linux": "Linux"}.get(
+        platform.system(), platform.system()
+    )
     variables_block = build_variables_block()
     if cfg.memory_semantic_recall and query_text.strip():
         notes_block = build_recall_context(query_text, cfg)
     else:
         notes_block = get_recent_notes(cfg.memory_inject_last_n_notes)
+    if _os == "Windows":
+        os_hints = (
+            f"On Windows, call open_app to launch any installed program (Spotify, Chrome, "
+            f"Discord, etc.) — never say an app is not installed without calling open_app "
+            f"first. music_play, music_pause, music_skip, music_previous, and get_now_playing "
+            f"are macOS-only; for Spotify on Windows use open_app (launch) or search_and_play "
+            f"(search). Diary memories claiming apps are missing or that you cannot open "
+            f"Windows apps are often wrong — trust open_app over those memories.\n\n"
+        )
+    else:
+        os_hints = (
+            f"When the user asks to open or launch a desktop app, call open_app — never guess "
+            f"whether it is installed without trying.\n\n"
+        )
     return [
         {
             "type": "text",
@@ -731,8 +819,15 @@ def _build_system_blocks(cfg: Config, query_text: str = "") -> list[dict[str, An
         },
         {
             "type": "text",
-            "text": f"You know the following about the user:\n{variables_block}\n\n"
-            f"Relevant memories:\n{notes_block}",
+            "text": (
+                f"You are running on the user's {_os} machine. Only offer apps, shortcuts, "
+                f"and actions that exist on {_os}; never assume macOS. If a capability is "
+                f"macOS-only and the user is not on macOS, say so plainly instead of pretending "
+                f"it works.\n\n"
+                f"{os_hints}"
+                f"You know the following about the user:\n{variables_block}\n\n"
+                f"Relevant memories:\n{notes_block}"
+            ),
         },
     ]
 
@@ -828,11 +923,12 @@ def _call_claude(
     on_sentence: Callable[[str], None] | None = None,
 ) -> tuple[str, str, float, bool]:
     from llm import get_llm_client
-    from llm.router import resolve_models
+    from llm.router import models_for, resolve_models
 
     provider, fast_model, smart_model = resolve_models(text, cfg)
     client = get_llm_client(cfg, timeout=CLAUDE_HTTP_TIMEOUT_SEC, provider=provider)
     model = fast_model
+    switched_to_anthropic = False
     logger.info("🧠 Routed to %s — starting on %s (escalate → %s)", provider, model, smart_model)
 
     messages: list[dict[str, Any]] = list(history or [])
@@ -877,6 +973,23 @@ def _call_claude(
             logger.error("⚠️  Claude API error: %s", exc, exc_info=True)
             if _interrupt.is_set():
                 return "", model, total_cost, stream_spoken
+            if (
+                not switched_to_anthropic
+                and provider != "anthropic"
+                and (cfg.anthropic_api_key or "").strip()
+            ):
+                logger.warning(
+                    "⚠️  %s failed (%s) — retrying this turn on Anthropic.", provider, exc
+                )
+                on_smart_tier = model == smart_model
+                switched_to_anthropic = True
+                provider = "anthropic"
+                client = get_llm_client(
+                    cfg, timeout=CLAUDE_HTTP_TIMEOUT_SEC, provider="anthropic"
+                )
+                fast_model, smart_model = models_for("anthropic", cfg)
+                model = smart_model if on_smart_tier else fast_model
+                continue
             return "Sorry, I couldn't reach my brain. Please try again.", model, total_cost, stream_spoken
 
         if response is None:
@@ -1238,6 +1351,10 @@ def run_pipeline(
                             capture_queue, capturing, paused, cfg, set_state,
                             skip_drain=True,
                         )
+                        if text is None:
+                            text = _await_followup_utterance(
+                                capture_queue, capturing, paused, cfg, set_state, wake_event,
+                            )
                         continue
 
                     if _interrupt.is_set():
@@ -1248,48 +1365,15 @@ def run_pipeline(
                     if job is not None and job.capped:
                         break
 
-                    awaiting_answer = bool(job and job.reply and job.reply.rstrip().endswith("?"))
-                    wait_frames = (
-                        _answer_wait_frames(cfg) if awaiting_answer else _followup_wait_frames(cfg)
+                    text = _await_followup_utterance(
+                        capture_queue, capturing, paused, cfg, set_state, wake_event,
                     )
-                    _reset_audio_for_followup(wake_event, capture_queue, capturing, paused)
-                    transition(
-                        set_state,
-                        SpeechPhase.FOLLOWUP_WINDOW,
-                        reason="awaiting answer" if awaiting_answer else "follow-up",
-                    )
-                    logger.info(
-                        "👂 %s…",
-                        "Waiting for your answer" if awaiting_answer else "Listening for follow-up",
-                    )
-                    text = _capture_and_transcribe(
-                        capture_queue,
-                        capturing,
-                        paused,
-                        cfg,
-                        set_state,
-                        wait_for_speech_frames=wait_frames,
-                        silence_ms=cfg.followup_vad_silence_ms,
-                        min_capture_ms=cfg.followup_vad_min_capture_ms,
-                    )
-                    if text is None and awaiting_answer and not _interrupt.is_set():
-                        logger.info("👂 Still listening for your answer…")
-                        _reset_audio_for_followup(wake_event, capture_queue, capturing, paused)
-                        text = _capture_and_transcribe(
-                            capture_queue,
-                            capturing,
-                            paused,
-                            cfg,
-                            set_state,
-                            wait_for_speech_frames=wait_frames,
-                            silence_ms=cfg.followup_vad_silence_ms,
-                            min_capture_ms=cfg.followup_vad_min_capture_ms,
-                        )
                     if text is None:
                         break
 
             except Exception as exc:  # noqa: BLE001
                 logger.error("⚠️  Pipeline cycle failed: %s", exc, exc_info=True)
+                logger.info("↩️  Resuming wake-word wait after cycle error.")
             finally:
                 capturing.clear()
                 paused.clear()

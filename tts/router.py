@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable, Iterator
 
 from config import Config
 from tts import cartesia, elevenlabs
+from tts.cartesia import _cancel
 from tts.errors import TTSError
 
 logger = logging.getLogger("jarvis.tts")
@@ -25,7 +27,8 @@ def _resolve_elevenlabs_voice(voice_id: str | None, cfg: Config) -> str:
     return voice_id or cfg.elevenlabs_voice_id
 
 
-def _chosen_provider(cfg: Config, provider: str | None) -> str:
+def effective_tts_provider(cfg: "Config", provider: str | None = None) -> str:
+    """Provider that will actually run given configured API keys."""
     chosen = (provider or cfg.tts_provider or "elevenlabs").strip().lower()
     if chosen == "elevenlabs" and not (cfg.elevenlabs_api_key or "").strip():
         if (cfg.cartesia_api_key or "").strip():
@@ -36,6 +39,10 @@ def _chosen_provider(cfg: Config, provider: str | None) -> str:
             return "elevenlabs"
         return "pyttsx3"
     return chosen
+
+
+def _chosen_provider(cfg: Config, provider: str | None) -> str:
+    return effective_tts_provider(cfg, provider)
 
 
 def stop_speech() -> None:
@@ -71,20 +78,31 @@ def _speak_with_cfg(
         resolved_voice,
         cfg.elevenlabs_model_id,
     )
-    try:
-        elevenlabs.speak(
-            text,
-            voice_id=resolved_voice,
-            model_id=cfg.elevenlabs_model_id,
-            on_first_chunk=on_first_chunk,
-        )
-    except TTSError as exc:
-        logger.warning("⚠️  ElevenLabs unavailable (%s) — falling back to Cartesia", exc)
-        cartesia.speak_cartesia(
-            text,
-            _resolve_cartesia_voice(None, cfg),
-            on_first_chunk=on_first_chunk,
-        )
+    last_exc: TTSError | None = None
+    for attempt in range(2):
+        if _cancel.is_set():
+            return
+        try:
+            elevenlabs.speak(
+                text,
+                voice_id=resolved_voice,
+                model_id=cfg.elevenlabs_model_id,
+                on_first_chunk=on_first_chunk,
+            )
+            return
+        except TTSError as exc:
+            last_exc = exc
+            logger.warning("ElevenLabs attempt %d failed: %s", attempt + 1, exc)
+            time.sleep(0.35)
+    logger.warning(
+        "ElevenLabs unavailable after retries (%s) — falling back to Cartesia",
+        last_exc,
+    )
+    cartesia.speak_cartesia(
+        text,
+        _resolve_cartesia_voice(None, cfg),
+        on_first_chunk=on_first_chunk,
+    )
 
 
 def speak(

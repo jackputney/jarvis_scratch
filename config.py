@@ -61,6 +61,7 @@ _PERSISTED_FIELDS = (
     "followup_listen_sec",
     "followup_vad_silence_ms",
     "followup_vad_min_capture_ms",
+    "conversation_idle_timeout_sec",
     "tts_trailing_silence_ms",
     "hotkey_enabled",
     "hotkey_combo",
@@ -101,9 +102,9 @@ class Config:
     gemini_model_fast: str = "gemini-2.5-flash"
     gemini_model_smart: str = "gemini-2.5-pro"
     routing_word_threshold: int = 20
-    whisper_model: str = "tiny"
-    stt_backend: str = "mlx"
-    stt_model: str = "tiny"
+    whisper_model: str = "small"  # cross-platform: exists for both mlx-whisper and faster-whisper
+    stt_backend: str = "mlx"  # macOS native; auto-falls back to faster-whisper on Windows/Linux
+    stt_model: str = "small"  # "small" balances accuracy/speed and resolves on both STT backends
     streaming_tts: bool = True
     tts_provider: str = "elevenlabs"  # elevenlabs | cartesia | pyttsx3
     cartesia_voice_id: str = "a0e99841-438c-4a64-b679-ae501e7d6091"
@@ -118,9 +119,10 @@ class Config:
     barge_in_enabled: bool = True  # say the wake word during a reply to cut it off and ask again
     barge_in_threshold: float = 0.48
     barge_in_hits: int = 2
-    followup_listen_sec: int = 5
-    followup_vad_silence_ms: int = 600
-    followup_vad_min_capture_ms: int = 350
+    followup_listen_sec: int = 10
+    followup_vad_silence_ms: int = 1100
+    followup_vad_min_capture_ms: int = 800
+    conversation_idle_timeout_sec: int = 20
     tts_trailing_silence_ms: int = 80
     hotkey_enabled: bool = True  # register a global keyboard shortcut to wake Jarvis
     hotkey_combo: str = "<ctrl>+<shift>+<space>"  # pynput format: <ctrl>/<shift>/<alt>/<cmd> + key
@@ -193,6 +195,9 @@ class Config:
             followup_vad_silence_ms=int(data.get("followup_vad_silence_ms", cls.followup_vad_silence_ms)),
             followup_vad_min_capture_ms=int(
                 data.get("followup_vad_min_capture_ms", cls.followup_vad_min_capture_ms)
+            ),
+            conversation_idle_timeout_sec=int(
+                data.get("conversation_idle_timeout_sec", cls.conversation_idle_timeout_sec)
             ),
             tts_trailing_silence_ms=int(data.get("tts_trailing_silence_ms", cls.tts_trailing_silence_ms)),
             hotkey_enabled=data.get("hotkey_enabled", cls.hotkey_enabled),

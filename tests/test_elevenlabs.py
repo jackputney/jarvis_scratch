@@ -68,19 +68,87 @@ def test_elevenlabs_output_format_free_tier():
     assert elevenlabs.ELEVENLABS_SAMPLE_RATE == 16000
 
 
+def test_elevenlabs_error_includes_status_code(monkeypatch):
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "test-key")
+
+    class RateLimitError(Exception):
+        status_code = 429
+
+        def __str__(self) -> str:
+            return "rate limit exceeded"
+
+    with patch("tts.elevenlabs._iter_elevenlabs_audio", return_value=iter([b"\x00\x01"])), \
+         patch("tts.elevenlabs._play_pcm_stream", side_effect=RateLimitError()):
+        from tts import elevenlabs
+
+        with pytest.raises(TTSError, match="429") as exc_info:
+            elevenlabs.speak("Hello", voice_id="JBFqnCBsd6RMkjVDRZzb")
+        assert "rate limit exceeded" in str(exc_info.value)
+
+
 def test_router_falls_back_to_cartesia_on_tts_error(monkeypatch):
     monkeypatch.setenv("ELEVENLABS_API_KEY", "test-key")
     cartesia_calls: list[tuple] = []
+    eleven_calls: list[int] = []
 
     def fake_cartesia(text, voice_id, **kwargs):
         cartesia_calls.append((text, voice_id))
 
-    with patch("tts.elevenlabs.speak", side_effect=TTSError("API down")), \
+    def fake_elevenlabs(*_a, **_k):
+        eleven_calls.append(1)
+        raise TTSError("API down")
+
+    with patch("tts.router.time.sleep"), \
+         patch("tts.elevenlabs.speak", side_effect=fake_elevenlabs), \
          patch("tts.cartesia.speak_cartesia", side_effect=fake_cartesia):
         from tts.router import speak
 
         speak("Fallback please")
+        assert eleven_calls == [1, 1]
         assert cartesia_calls == [("Fallback please", Config().cartesia_voice_id)]
+
+
+def test_router_retries_elevenlabs_on_transient_error(monkeypatch):
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "test-key")
+    cartesia_calls: list[str] = []
+    eleven_calls: list[int] = []
+
+    def fake_elevenlabs(*_a, **_k):
+        eleven_calls.append(1)
+        if len(eleven_calls) == 1:
+            raise TTSError("ElevenLabs API error 429: rate limit")
+
+    with patch("tts.router.time.sleep"), \
+         patch("tts.elevenlabs.speak", side_effect=fake_elevenlabs), \
+         patch("tts.cartesia.speak_cartesia", side_effect=lambda text, *_a, **_k: cartesia_calls.append(text)):
+        from tts.router import speak
+
+        speak("Recover please")
+        assert eleven_calls == [1, 1]
+        assert cartesia_calls == []
+
+
+def test_router_skips_retry_when_cancelled(monkeypatch):
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "test-key")
+    from tts.cartesia import _cancel
+
+    cartesia_calls: list[str] = []
+    eleven_calls: list[int] = []
+
+    def fake_elevenlabs(*_a, **_k):
+        eleven_calls.append(1)
+        _cancel.set()
+        raise TTSError("interrupted")
+
+    with patch("tts.router.time.sleep"), \
+         patch("tts.elevenlabs.speak", side_effect=fake_elevenlabs), \
+         patch("tts.cartesia.speak_cartesia", side_effect=lambda text, *_a, **_k: cartesia_calls.append(text)):
+        from tts.router import speak
+
+        _cancel.clear()
+        speak("Stop me")
+        assert eleven_calls == [1]
+        assert cartesia_calls == []
 
 
 def test_router_falls_back_to_cartesia_without_api_key(monkeypatch):
