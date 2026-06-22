@@ -70,7 +70,7 @@ def _speak_with_cfg(
             on_first_chunk=on_first_chunk,
         )
     except TTSError as exc:
-        logger.debug("ElevenLabs unavailable (%s) — falling back to Cartesia", exc)
+        logger.warning("⚠️  ElevenLabs unavailable (%s) — falling back to Cartesia", exc)
         cartesia.speak_cartesia(
             text,
             _resolve_cartesia_voice(None, cfg),

@@ -7,10 +7,8 @@ import os
 from collections.abc import Callable, Iterator
 
 from tts.cartesia import (
-    SAMPLE_RATE,
     _cancel,
     _play_pcm_stream,
-    _silence_pcm,
     _trailing_silence_ms,
     stop_speech as cartesia_stop_speech,
 )
@@ -20,10 +18,20 @@ logger = logging.getLogger("jarvis.tts.elevenlabs")
 
 DEFAULT_MODEL = "eleven_flash_v2_5"
 DEFAULT_VOICE = "JBFqnCBsd6RMkjVDRZzb"
+# pcm_44100 requires ElevenLabs Pro; pcm_16000 works on free/starter tiers.
+ELEVENLABS_SAMPLE_RATE = 16000
+OUTPUT_FORMAT = "pcm_16000"
 
 
 def _api_key() -> str:
     return (os.environ.get("ELEVENLABS_API_KEY") or "").strip()
+
+
+def _silence_pcm_ms(ms: int, sample_rate: int = ELEVENLABS_SAMPLE_RATE) -> bytes:
+    nbytes = int(sample_rate * 2 * max(0, ms) / 1000)
+    if nbytes % 2:
+        nbytes += 1
+    return b"\x00" * nbytes
 
 
 def _iter_elevenlabs_audio(
@@ -39,7 +47,7 @@ def _iter_elevenlabs_audio(
         voice_id=voice_id,
         text=text,
         model_id=model_id,
-        output_format="pcm_44100",
+        output_format=OUTPUT_FORMAT,
     )
     for chunk in stream:
         if _cancel.is_set():
@@ -47,7 +55,7 @@ def _iter_elevenlabs_audio(
         if chunk:
             yield chunk
     if not _cancel.is_set():
-        yield _silence_pcm(_trailing_silence_ms())
+        yield _silence_pcm_ms(_trailing_silence_ms(), ELEVENLABS_SAMPLE_RATE)
 
 
 def _iter_elevenlabs_stream(
@@ -83,6 +91,7 @@ def speak(
         _play_pcm_stream(
             _iter_elevenlabs_audio(text.strip(), voice_id, model_id, api_key),
             on_first_chunk,
+            sample_rate=ELEVENLABS_SAMPLE_RATE,
         )
     except TTSError:
         raise
@@ -106,6 +115,7 @@ def speak_stream(
         _play_pcm_stream(
             _iter_elevenlabs_stream(text_chunks, voice_id, model_id, api_key),
             on_first_chunk,
+            sample_rate=ELEVENLABS_SAMPLE_RATE,
         )
     except TTSError:
         raise

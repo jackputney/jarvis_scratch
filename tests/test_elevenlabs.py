@@ -61,6 +61,13 @@ def test_elevenlabs_speaks_with_correct_voice_id(monkeypatch):
         assert captured["api_key"] == "test-key"
 
 
+def test_elevenlabs_output_format_free_tier():
+    from tts import elevenlabs
+
+    assert elevenlabs.OUTPUT_FORMAT == "pcm_16000"
+    assert elevenlabs.ELEVENLABS_SAMPLE_RATE == 16000
+
+
 def test_router_falls_back_to_cartesia_on_tts_error(monkeypatch):
     monkeypatch.setenv("ELEVENLABS_API_KEY", "test-key")
     cartesia_calls: list[tuple] = []
@@ -78,6 +85,7 @@ def test_router_falls_back_to_cartesia_on_tts_error(monkeypatch):
 
 def test_router_falls_back_to_cartesia_without_api_key(monkeypatch):
     monkeypatch.delenv("ELEVENLABS_API_KEY", raising=False)
+    monkeypatch.setattr("config._load_dotenv_if_present", lambda: None)
     cartesia_calls: list[str] = []
 
     with patch("tts.cartesia.speak_cartesia", side_effect=lambda text, *_a, **_k: cartesia_calls.append(text)):

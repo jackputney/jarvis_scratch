@@ -76,14 +76,15 @@ class _OutputStream:
     immediately so a barge-in / Stop cuts the reply with minimal tail.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, sample_rate: int = SAMPLE_RATE) -> None:
+        self._sample_rate = sample_rate
         self._sd = None
         self._pa_stream = None
         try:
             import sounddevice as sd
 
             self._sd = sd.RawOutputStream(
-                samplerate=SAMPLE_RATE, channels=CHANNELS, dtype="int16",
+                samplerate=sample_rate, channels=CHANNELS, dtype="int16",
                 blocksize=WRITE_FRAMES,
             )
             self._sd.start()
@@ -92,7 +93,7 @@ class _OutputStream:
             if _pa is None:
                 raise RuntimeError("no audio output backend (install sounddevice or pyaudio)")
             self._pa_stream = _pa.open(
-                format=PA_FORMAT, channels=CHANNELS, rate=SAMPLE_RATE,
+                format=PA_FORMAT, channels=CHANNELS, rate=sample_rate,
                 output=True, frames_per_buffer=WRITE_FRAMES,
             )
             self._pa_stream.start_stream()
@@ -176,9 +177,12 @@ def stop_speech() -> None:
 def _play_pcm_stream(
     chunks: Iterator[bytes],
     on_first_chunk: Callable[[], None] | None = None,
+    *,
+    sample_rate: int = SAMPLE_RATE,
 ) -> None:
-    """Play a stream of s16le mono PCM at SAMPLE_RATE (sounddevice or PyAudio)."""
+    """Play a stream of s16le mono PCM at sample_rate (sounddevice or PyAudio)."""
     audio_q: queue.Queue[bytes | None | Exception] = queue.Queue(maxsize=64)
+    prebuffer_bytes = int(sample_rate * SAMPLE_WIDTH * 0.12)
 
     def _producer() -> None:
         try:
@@ -193,7 +197,7 @@ def _play_pcm_stream(
 
     threading.Thread(target=_producer, daemon=True, name="jarvis-tts-producer").start()
 
-    stream = _OutputStream()
+    stream = _OutputStream(sample_rate=sample_rate)
 
     def _incoming() -> Iterator[bytes]:
         while True:
@@ -216,7 +220,7 @@ def _play_pcm_stream(
                 break
             buffer.extend(chunk)
 
-            if not playback_started and len(buffer) >= PREBUFFER_BYTES:
+            if not playback_started and len(buffer) >= prebuffer_bytes:
                 playback_started = True
 
             if not playback_started:
