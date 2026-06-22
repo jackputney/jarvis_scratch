@@ -15,10 +15,12 @@ dashboard's request threads can read/write concurrently.
 from __future__ import annotations
 
 import logging
+import os
 import sqlite3
 import threading
 import time
 from collections import deque
+from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
@@ -38,6 +40,9 @@ _state: dict[str, Any] = {
 _init_lock = threading.Lock()
 _initialised = True  # schema owned by memory.db.init_db()
 
+_state_listeners: list[Callable[[str], None]] = []
+_dev_mode = os.environ.get("JARVIS_DEV", "").strip().lower() in ("1", "true", "yes")
+
 
 def _connect() -> sqlite3.Connection:
     init_db()
@@ -54,13 +59,39 @@ def emit(event_type: str, **data: Any) -> None:
         _events.append({"ts": datetime.now().isoformat(), "type": event_type, **data})
 
 
+def subscribe_pipeline_state(callback: Callable[[str], None]) -> None:
+    """Register a listener for pipeline state changes (single source of truth)."""
+    with _lock:
+        if callback not in _state_listeners:
+            _state_listeners.append(callback)
+
+
+def unsubscribe_pipeline_state(callback: Callable[[str], None]) -> None:
+    with _lock:
+        try:
+            _state_listeners.remove(callback)
+        except ValueError:
+            pass
+
+
+def get_pipeline_state() -> str:
+    with _lock:
+        return str(_state.get("pipeline_state", "IDLE"))
+
+
 def set_pipeline_state(state: str) -> None:
     with _lock:
         prev = _state["pipeline_state"]
         _state["pipeline_state"] = state
+        listeners = list(_state_listeners)
     if prev != state:
         logger.info("STATE: %s → %s", prev, state)
     emit("state", state=state)
+    for cb in listeners:
+        try:
+            cb(state)
+        except Exception:  # noqa: BLE001
+            logger.debug("pipeline state listener failed for %s", state, exc_info=True)
 
 
 def set_muted(muted: bool) -> None:

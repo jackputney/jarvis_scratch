@@ -562,8 +562,15 @@ class FaceWidget(QWidget):
         self._drag_pos: QPointF | None = None
         self._interrupt_cb: Callable[[], None] | None = None
         self._shutting_down = False
+        self._authoritative_state = "IDLE"
+        self._pending_state: str | None = None
         self._orb = OrbWidget(self)
         self._orb.setGeometry(0, 0, HUD_W, HUD_H)
+
+        self._state_debounce = QTimer(self)
+        self._state_debounce.setSingleShot(True)
+        self._state_debounce.setInterval(50)
+        self._state_debounce.timeout.connect(self._flush_pending_state)
 
         QShortcut(QKeySequence(Qt.Key.Key_Escape), self, self._on_stop)
 
@@ -609,6 +616,10 @@ class FaceWidget(QWidget):
         """Allow the window to close during app exit."""
         self._shutting_down = True
         self._visibility_timer.stop()
+        self._state_debounce.stop()
+        import events
+
+        events.unsubscribe_pipeline_state(self.schedule_pipeline_state)
         self._orb.stop_animations()
         self.close()
 
@@ -640,6 +651,49 @@ class FaceWidget(QWidget):
             self._drag_pos = event.globalPosition().toPoint() - self.pos()
             event.accept()
 
+    def connect_pipeline_state(self) -> None:
+        """Subscribe to the central EventBus — orb state must not be set elsewhere."""
+        import events
+
+        events.subscribe_pipeline_state(self.schedule_pipeline_state)
+
+    def schedule_pipeline_state(self, state_name: str) -> None:
+        """Debounced pipeline state update (50 ms) to avoid THINKING/LISTENING flicker."""
+        QMetaObject.invokeMethod(
+            self,
+            "_queue_pipeline_state",
+            Qt.ConnectionType.QueuedConnection,
+            Q_ARG(str, state_name),
+        )
+
+    @pyqtSlot(str)
+    def _queue_pipeline_state(self, state_name: str) -> None:
+        self._pending_state = state_name
+        self._state_debounce.start()
+
+    @pyqtSlot()
+    def _flush_pending_state(self) -> None:
+        name = self._pending_state
+        if not name:
+            return
+        self._authoritative_state = name
+        self._apply_state(name)
+        self._validate_state_sync()
+
+    def _validate_state_sync(self) -> None:
+        if os.environ.get("JARVIS_DEV", "").strip().lower() not in ("1", "true", "yes"):
+            return
+        import events
+
+        pipeline_state = events.get_pipeline_state()
+        orb_state = self._orb._animator.state
+        if orb_state != pipeline_state:
+            logger.warning(
+                "⚠️  Orb state mismatch: orb=%s pipeline=%s",
+                orb_state,
+                pipeline_state,
+            )
+
     @pyqtSlot(str)
     def _apply_state(self, state_name: str) -> None:
         try:
@@ -649,12 +703,8 @@ class FaceWidget(QWidget):
         self._orb.set_state(state)
 
     def set_state(self, state: JarvisState) -> None:
-        QMetaObject.invokeMethod(
-            self,
-            "_apply_state",
-            Qt.ConnectionType.QueuedConnection,
-            Q_ARG(str, state.name),
-        )
+        """Direct set — tests only; production uses connect_pipeline_state()."""
+        self.schedule_pipeline_state(state.name)
 
     @pyqtSlot(str)
     def _apply_budget_level(self, level: str) -> None:

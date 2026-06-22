@@ -248,7 +248,7 @@ def _run_with_ui(cfg: Config) -> None:
     """Start the face widget on the main thread, pipeline on a daemon thread."""
     from PyQt6.QtCore import QTimer
     from PyQt6.QtWidgets import QApplication
-    from ui.face import FaceWidget, JarvisState
+    from ui.face import FaceWidget
     from pipeline import run_pipeline
     from orchestrator.runtime import get_orchestrator
 
@@ -261,6 +261,7 @@ def _run_with_ui(cfg: Config) -> None:
     face = FaceWidget()
     # Stop button / Escape cancels the running turn and clears the queue.
     face.set_interrupt_callback(get_orchestrator().cancel_current)
+    face.connect_pipeline_state()
     face.show_overlay()
 
     _start_dashboard_window(cfg)
@@ -284,18 +285,10 @@ def _run_with_ui(cfg: Config) -> None:
         if _scheduler is not None:
             _scheduler.shutdown()
 
-    def state_callback(state_name: str) -> None:
-        try:
-            state = JarvisState[state_name]
-        except KeyError:
-            return
-        face.set_state(state)
-
     pipeline_thread = threading.Thread(
         target=run_pipeline,
         kwargs={
             "cfg": cfg,
-            "state_callback": state_callback,
             "stop_event": stop_event,
             "is_muted": lambda: face.muted,            # F10: pipeline honours the mute orb
             "budget_callback": face.set_budget_level,  # orb turns amber/red on spend
