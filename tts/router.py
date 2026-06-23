@@ -79,7 +79,7 @@ def _speak_with_cfg(
         cfg.elevenlabs_model_id,
     )
     last_exc: TTSError | None = None
-    for attempt in range(2):
+    for attempt in range(3):
         if _cancel.is_set():
             return
         try:
@@ -93,7 +93,7 @@ def _speak_with_cfg(
         except TTSError as exc:
             last_exc = exc
             logger.warning("ElevenLabs attempt %d failed: %s", attempt + 1, exc)
-            time.sleep(0.35)
+            time.sleep(0.4 * (attempt + 1))
     logger.warning(
         "ElevenLabs unavailable after retries (%s) — falling back to Cartesia",
         last_exc,
@@ -121,6 +121,21 @@ def speak(
     _speak_with_cfg(text.strip(), _cfg(), voice_id, on_first_chunk, provider)
 
 
+def _buffering_chunk_iter(
+    text_chunks: Iterator[str],
+    buffer: list[str],
+) -> Iterator[str]:
+    """Pass chunks through while copying them for retry / fallback playback."""
+    for chunk in text_chunks:
+        if _cancelled():
+            return
+        text = (chunk or "").strip()
+        if not text:
+            continue
+        buffer.append(text)
+        yield text
+
+
 def speak_stream(
     text_chunks: Iterator[str],
     voice_id: str | None = None,
@@ -128,20 +143,58 @@ def speak_stream(
     *,
     provider: str | None = None,
 ) -> None:
-    """Speak streaming sentence chunks; reloads provider/voice from config per chunk."""
+    """Speak streaming sentence chunks in one continuous playback session."""
     from tts.cartesia import _cancel
 
     _cancel.clear()
-    first = True
-    for chunk in text_chunks:
-        if _cancelled():
+    cfg = _cfg()
+    chosen = _chosen_provider(cfg, provider)
+    buffer: list[str] = []
+    live = _buffering_chunk_iter(text_chunks, buffer)
+
+    if chosen == "pyttsx3":
+        for text in live:
+            cartesia._speak_local(text)
+        return
+
+    if chosen == "cartesia":
+        cartesia.speak_cartesia_stream(
+            live,
+            _resolve_cartesia_voice(voice_id, cfg),
+            on_first_chunk=on_first_chunk,
+        )
+        return
+
+    resolved_voice = _resolve_elevenlabs_voice(voice_id, cfg)
+    last_exc: TTSError | None = None
+    for attempt in range(3):
+        if _cancel.is_set():
             return
-        text = (chunk or "").strip()
-        if not text:
-            continue
-        cb = on_first_chunk if first else None
-        first = False
-        _speak_with_cfg(text, _cfg(), voice_id, cb, provider)
+        source: Iterator[str] = live if attempt == 0 else iter(buffer)
+        try:
+            elevenlabs.speak_stream(
+                source,
+                voice_id=resolved_voice,
+                model_id=cfg.elevenlabs_model_id,
+                on_first_chunk=on_first_chunk,
+            )
+            return
+        except TTSError as exc:
+            last_exc = exc
+            logger.warning("ElevenLabs stream attempt %d failed: %s", attempt + 1, exc)
+            time.sleep(0.4 * (attempt + 1))
+
+    if not buffer:
+        return
+    logger.warning(
+        "ElevenLabs stream unavailable after retries (%s) — falling back to Cartesia",
+        last_exc,
+    )
+    cartesia.speak_cartesia_stream(
+        iter(buffer),
+        _resolve_cartesia_voice(None, cfg),
+        on_first_chunk=on_first_chunk,
+    )
 
 
 def _cancelled() -> bool:

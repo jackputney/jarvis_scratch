@@ -196,24 +196,24 @@ def test_search_and_play_windows_opens_spotify(monkeypatch):
     monkeypatch.setattr(music.platform, "system", lambda: "Windows")
     rec: dict = {}
 
-    def fake_run(cmd, **kwargs):
+    def fake_popen(cmd, **kwargs):
         rec["cmd"] = cmd
-        return CompletedProcess(cmd, 0, stdout="", stderr="")
+        return MagicMock()
 
-    monkeypatch.setattr(music.subprocess, "run", fake_run)
+    monkeypatch.setattr(music.subprocess, "Popen", fake_popen)
     result = search_and_play("daft punk")
     assert "Spotify search" in result
-    assert rec["cmd"][:3] == ["cmd", "/c", "start"]
-    assert rec["cmd"][4].startswith("spotify:search:")
+    assert "can't control playback on Windows" in result
+    assert rec["cmd"] == ["powershell", "-NoProfile", "-Command", "Start-Process", "spotify:search:daft%20punk"]
 
 
 def test_search_and_play_windows_failure(monkeypatch):
     monkeypatch.setattr(music.platform, "system", lambda: "Windows")
 
-    def fake_run(cmd, **kwargs):
+    def fake_popen(cmd, **kwargs):
         raise OSError("no spotify")
 
-    monkeypatch.setattr(music.subprocess, "run", fake_run)
+    monkeypatch.setattr(music.subprocess, "Popen", fake_popen)
     assert "Could not open Spotify" in search_and_play("test")
 
 

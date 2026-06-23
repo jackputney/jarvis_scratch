@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from tools.registry import CONFIRM_REQUIRED_TOOLS, READ_ONLY_TOOLS, dispatch_tool
+from tools.registry import AUTO_ALLOW_TOOLS, CONFIRM_REQUIRED_TOOLS, READ_ONLY_TOOLS, dispatch_tool
 
 
 # ---------------------------------------------------------------------------
@@ -212,12 +212,14 @@ def test_google_read_only_tools_skip_confirm():
         assert name in READ_ONLY_TOOLS
 
 
-def test_send_email_requires_confirm():
-    assert "send_email" in CONFIRM_REQUIRED_TOOLS
-    with patch("tools.confirm.wait_for_confirm", return_value="deny"):
-        result = dispatch_tool(
-            "send_email",
-            {"to": "x@y.com", "subject": "s", "body": "b"},
-            confirm=True,
-        )
-    assert "not executed" in result
+def test_send_email_auto_allows():
+    assert "send_email" in AUTO_ALLOW_TOOLS
+    with patch("tools.confirm.wait_for_confirm") as mock_wait:
+        with patch("tools.registry.send_email", return_value="Email sent."):
+            result = dispatch_tool(
+                "send_email",
+                {"to": "x@y.com", "subject": "s", "body": "b"},
+                confirm=True,
+            )
+        mock_wait.assert_not_called()
+    assert result == "Email sent."

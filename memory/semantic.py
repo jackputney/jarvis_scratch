@@ -26,6 +26,22 @@ MAX_CHUNK_CHARS = 480
 MAX_INJECT_CHARS = 4000
 _TRUNC = "\n…[truncated]"
 
+# Diary auto-learn can persist pre-fix refusals ("can't open Windows apps"). Drop them
+# from recall so they don't override live tool capabilities.
+_STALE_CAPABILITY_DENIAL = re.compile(
+    r"can't open arbitrary|cannot open arbitrary|"
+    r"can't open .+ directly on windows|cannot open .+ on windows|"
+    r"isn't in (my|that) list for me on windows|"
+    r"i work with a specific set of apps|"
+    r"hardcoded list of applications|"
+    r"constrained to a hardcoded",
+    re.IGNORECASE,
+)
+
+
+def _filter_recall_hits(hits: list[dict]) -> list[dict]:
+    return [h for h in hits if not _STALE_CAPABILITY_DENIAL.search(h.get("chunk", ""))]
+
 
 def _connect(cfg: "Config | None" = None) -> sqlite3.Connection:
     path = store.index_db_path(cfg)
@@ -164,7 +180,8 @@ def build_recall_context(query: str, cfg: "Config | None" = None) -> str:
 
         cfg = _Config.load()
     top_k = getattr(cfg, "memory_recall_top_k", 5)
-    hits = search(query, top_k=top_k, cfg=cfg)
+    hits = search(query, top_k=top_k * 3, cfg=cfg)
+    hits = _filter_recall_hits(hits)[:top_k]
     if not hits:
         from memory.knowledge import get_recent_notes
 

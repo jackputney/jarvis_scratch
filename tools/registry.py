@@ -212,22 +212,34 @@ TOOL_DEFINITIONS: list[dict] = [
     },
     {
         "name": "music_play",
-        "description": "Start or resume playback in the macOS Music app.",
+        "description": (
+            "Start or resume playback in the macOS Music app. macOS only — on Windows Jarvis "
+            "cannot control playback; use search_and_play or open_app to open Spotify instead."
+        ),
         "input_schema": {"type": "object", "properties": {}, "required": []},
     },
     {
         "name": "music_pause",
-        "description": "Pause playback in the macOS Music app.",
+        "description": (
+            "Pause playback in the macOS Music app. macOS only — on Windows Jarvis cannot "
+            "control playback."
+        ),
         "input_schema": {"type": "object", "properties": {}, "required": []},
     },
     {
         "name": "music_skip",
-        "description": "Skip to the next track in the macOS Music app.",
+        "description": (
+            "Skip to the next track in the macOS Music app. macOS only — on Windows Jarvis "
+            "cannot control playback."
+        ),
         "input_schema": {"type": "object", "properties": {}, "required": []},
     },
     {
         "name": "music_previous",
-        "description": "Go to the previous track in the macOS Music app.",
+        "description": (
+            "Go to the previous track in the macOS Music app. macOS only — on Windows Jarvis "
+            "cannot control playback."
+        ),
         "input_schema": {"type": "object", "properties": {}, "required": []},
     },
     {
@@ -243,14 +255,18 @@ TOOL_DEFINITIONS: list[dict] = [
     },
     {
         "name": "get_now_playing",
-        "description": "Get the currently playing song from Music.app (title, artist, album, state).",
+        "description": (
+            "Get the currently playing song from macOS Music.app (title, artist, album, state). "
+            "macOS only — on Windows playback state is not available."
+        ),
         "input_schema": {"type": "object", "properties": {}, "required": []},
     },
     {
         "name": "search_and_play",
         "description": (
-            "Search for a song and play the top match in Music.app (macOS). "
-            "On Windows, opens a Spotify search for the query."
+            "Search for a song and play the top match in macOS Music.app. macOS only for playback. "
+            "On Windows: opens a Spotify search URI only (cannot play/pause/skip); tell the user "
+            "to press play in Spotify. Also use open_app for Spotify."
         ),
         "input_schema": {
             "type": "object",
@@ -549,7 +565,7 @@ TOOL_DEFINITIONS: list[dict] = [
     },
     {
         "name": "send_email",
-        "description": "Send a plain-text email via Gmail. The user gives only a recipient and the gist — infer a short subject yourself and draft the body from their intent. Never ask the user for a subject line or to dictate the body verbatim. Requires user confirmation.",
+        "description": "Send a plain-text email via Gmail. The user gives only a recipient and the gist — infer a short subject yourself and draft the body from their intent. Never ask the user for a subject line or to dictate the body verbatim. Call this tool immediately when asked to send mail; do not ask for confirmation.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -855,6 +871,7 @@ AUTO_ALLOW_TOOLS = frozenset({
     "write_note",
     "remember",
     "escalate",
+    "send_email",
 })
 
 # Moderate-risk tools — dashboard confirm in voice mode when confirm_before_execute is on.
@@ -873,7 +890,6 @@ MODERATE_TOOLS = frozenset({
 # High-risk mutating tools — dashboard confirm required when confirm_before_execute is on.
 CONFIRM_REQUIRED_TOOLS = frozenset({
     "download_file",
-    "send_email",
     "append_row",
     "update_cell",
     "send_slack_message",

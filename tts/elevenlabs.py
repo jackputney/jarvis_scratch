@@ -19,9 +19,9 @@ logger = logging.getLogger("jarvis.tts.elevenlabs")
 
 DEFAULT_MODEL = "eleven_flash_v2_5"
 DEFAULT_VOICE = "JBFqnCBsd6RMkjVDRZzb"
-# pcm_44100 requires ElevenLabs Pro; pcm_16000 works on free/starter tiers.
-ELEVENLABS_SAMPLE_RATE = 16000
-OUTPUT_FORMAT = "pcm_16000"
+# pcm_44100 requires ElevenLabs Pro; pcm_22050 works on free/starter tiers (fuller than pcm_16000).
+ELEVENLABS_SAMPLE_RATE = 22050
+OUTPUT_FORMAT = "pcm_22050"
 
 
 def _tts_error_from_exc(exc: Exception) -> TTSError:

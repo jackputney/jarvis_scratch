@@ -45,11 +45,25 @@ def test_wait_for_dashboard_times_out():
         assert dw.wait_for_dashboard(timeout=0.3) is False
 
 
-def test_start_native_dashboard_window_skips_non_macos():
+def test_start_native_dashboard_window_skips_unsupported_platform():
     from dashboard import window as dw
 
-    with patch("sys.platform", "win32"):
+    with patch("sys.platform", "linux"):
         assert dw.start_native_dashboard_window() is None
+
+
+@patch.object(sys, "platform", "win32")
+def test_start_native_dashboard_window_starts_on_windows():
+    from dashboard import window as dw
+
+    dw._window_thread = None
+
+    with patch.object(dw, "_run_dashboard_window"):
+        t = dw.start_native_dashboard_window()
+        assert t is not None
+        assert isinstance(t, threading.Thread)
+        t.join(timeout=2.0)
+        dw._window_thread = None
 
 
 @patch.object(sys, "platform", "darwin")
@@ -101,8 +115,16 @@ def test_run_dashboard_window_skips_when_not_ready():
 def test_native_window_supported_false_without_pywebview():
     from dashboard import window as dw
 
-    with patch.dict(sys.modules, {"webview": None}):
+    with patch("sys.platform", "win32"), patch.dict(sys.modules, {"webview": None}):
         assert dw.native_window_supported() is False
+
+
+def test_native_window_supported_true_on_windows_with_pywebview():
+    from dashboard import window as dw
+
+    fake_webview = MagicMock()
+    with patch("sys.platform", "win32"), patch.dict(sys.modules, {"webview": fake_webview}):
+        assert dw.native_window_supported() is True
 
 
 def test_launched_by_launchd_env():

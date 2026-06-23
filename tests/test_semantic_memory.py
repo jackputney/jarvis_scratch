@@ -84,3 +84,38 @@ def test_write_note_triggers_reindex(memory_root):
     hits = semantic.search("cats", top_k=2)
     assert hits
     assert "Pixel" in hits[0]["chunk"]
+
+
+def test_filter_recall_hits_drops_stale_windows_denials():
+    hits = [
+        {"source": "diary/x.md", "title": "Today", "chunk": "User asked to open Spotify."},
+        {
+            "source": "diary/x.md",
+            "title": "Today",
+            "chunk": "I can't open arbitrary Windows applications by name the way I can on Mac.",
+        },
+    ]
+    filtered = semantic._filter_recall_hits(hits)
+    assert len(filtered) == 1
+    assert "Spotify" in filtered[0]["chunk"]
+
+
+def test_build_recall_context_skips_stale_capability_denials(memory_root, monkeypatch):
+    stale = {
+        "source": "diary/x.md",
+        "title": "Today",
+        "chunk": "I can't open arbitrary Windows applications by name.",
+    }
+    good = {
+        "source": "notes/prefs.md",
+        "title": "Prefs",
+        "chunk": "User prefers dark mode.",
+    }
+    monkeypatch.setattr(
+        semantic,
+        "search",
+        lambda query, top_k=5, cfg=None: [stale, good][:top_k],
+    )
+    block = semantic.build_recall_context("open discord", Config.load())
+    assert "arbitrary windows" not in block.lower()
+    assert "dark mode" in block.lower()

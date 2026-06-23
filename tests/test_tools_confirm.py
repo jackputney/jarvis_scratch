@@ -19,18 +19,18 @@ def test_read_only_tools_skip_confirm():
 
 
 def test_auto_allow_tools_skip_dashboard_confirm():
-    assert AUTO_ALLOW_TOOLS >= {"open_app", "set_variable", "write_note"}
+    assert AUTO_ALLOW_TOOLS >= {"open_app", "set_variable", "write_note", "send_email"}
     with patch("tools.confirm.wait_for_confirm") as mock_wait:
         dispatch_tool("write_note", {"title": "t", "content": "c"}, confirm=True)
         mock_wait.assert_not_called()
 
 
 def test_high_risk_tools_use_dashboard_confirm():
-    assert "send_email" in CONFIRM_REQUIRED_TOOLS
+    assert "append_row" in CONFIRM_REQUIRED_TOOLS
     with patch("tools.confirm.wait_for_confirm", return_value="deny") as mock_wait:
         result = dispatch_tool(
-            "send_email",
-            {"to": "x@y.com", "subject": "s", "body": "b"},
+            "append_row",
+            {"spreadsheet_id": "id", "sheet_name": "S", "values": ["a"]},
             confirm=True,
             confirm_timeout_sec=30,
         )

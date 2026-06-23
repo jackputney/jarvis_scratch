@@ -167,14 +167,15 @@ def _start_dashboard() -> None:
 
 
 def _start_dashboard_window(cfg: Config) -> None:
-    """Open the Flask dashboard in a native PyWebView window (macOS)."""
+    """Open the Flask dashboard in a native PyWebView window (macOS/Windows)."""
     if not cfg.dashboard_native_window:
         return
-    if platform.system() != "Darwin":
-        return
     try:
-        from dashboard.window import start_native_dashboard_window
+        from dashboard.window import native_window_supported, start_native_dashboard_window
 
+        if not native_window_supported():
+            print(f"⚠️  Native dashboard window unavailable (install pywebview). Use {DASHBOARD_URL}")
+            return
         start_native_dashboard_window()
     except Exception as exc:  # noqa: BLE001
         print(f"⚠️  Native dashboard window unavailable ({exc}). Use {DASHBOARD_URL}")
@@ -200,8 +201,13 @@ def _print_banner(cfg: Config) -> None:
     print("🤖 Jarvis is up.")
     print(f"   🗣️  Trigger phrase : “{trigger}”" + ("" if cfg.wake_word_enabled else "  (voice disabled)"))
     print(f"   📊 Dashboard      : {DASHBOARD_URL}")
-    if cfg.dashboard_native_window and platform.system() == "Darwin":
-        print("   🪟 Dashboard UI   : native window (PyWebView)")
+    if cfg.dashboard_native_window:
+        from dashboard.window import native_window_supported
+
+        if native_window_supported():
+            print("   🪟 Dashboard UI   : native window (PyWebView)")
+        else:
+            print(f"   🪟 Dashboard UI   : browser ({DASHBOARD_URL}) — pip install pywebview for app window")
     if cfg.hotkey_enabled:
         print(f"   ⌨️  Global hotkey  : {cfg.hotkey_combo}")
     print(f"   🧠 Models         : {cfg.claude_model_fast} (fast) / {cfg.claude_model_smart} (smart)")

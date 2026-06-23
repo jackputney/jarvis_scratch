@@ -88,12 +88,17 @@ def test_open_app_uses_powershell_on_windows(monkeypatch):
     calls: list[list[str]] = []
     monkeypatch.setattr("tools.system.platform.system", lambda: "Windows")
     monkeypatch.setattr(
+        "tools.system._find_windows_start_app",
+        lambda name: ("Spotify", "com.spotify.client"),
+    )
+    monkeypatch.setattr(
         "tools.system.subprocess.run",
         lambda cmd, **kw: calls.append(cmd) or type("R", (), {"returncode": 0, "stderr": "", "stdout": ""})(),
     )
     out = open_app("Spotify")
     assert "Opened" in out
-    assert calls == [["powershell", "-NoProfile", "-Command", "Start-Process", "Spotify"]]
+    assert calls[0][:4] == ["cmd", "/c", "start", ""]
+    assert "shell:AppsFolder\\com.spotify.client" in calls[0][4]
 
 
 def test_send_email_rejects_invalid_address():
@@ -146,8 +151,8 @@ def test_confirm_ux_waiting_state_and_speech(temp_env, monkeypatch):
     class ToolBlock:
         type = "tool_use"
         id = "tu1"
-        name = "send_email"
-        input = {"to": "a@b.com", "subject": "s", "body": "b"}
+        name = "append_row"
+        input = {"spreadsheet_id": "id", "sheet_name": "S", "values": ["a"]}
 
     class TextBlock:
         type = "text"
@@ -155,7 +160,7 @@ def test_confirm_ux_waiting_state_and_speech(temp_env, monkeypatch):
 
     class TextOnly:
         type = "text"
-        text = "Email sent."
+        text = "Row added."
 
     def fake_submit(fn, *args, **kwargs):
         round_num["n"] += 1
@@ -179,15 +184,15 @@ def test_confirm_ux_waiting_state_and_speech(temp_env, monkeypatch):
 
     cfg = Config(confirm_before_execute=True)
     reply, _model, _cost, _stream = pipeline._call_claude(
-        "send an email",
+        "add a row to the sheet",
         cfg,
         on_state=on_state,
     )
 
-    assert reply == "Email sent."
+    assert reply == "Row added."
     assert states.index("WAITING_CONFIRM") < states.index("THINKING")
     assert speaks and "approval" in speaks[0].lower()
-    assert dispatch_order == ["send_email"]
+    assert dispatch_order == ["append_row"]
     assert speaks[0] == pipeline.CONFIRM_PROMPT
     assert events.get_state()["pipeline_state"] == "THINKING"
 

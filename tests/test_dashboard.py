@@ -112,7 +112,7 @@ def test_tools_list_includes_tiers(client):
     names = {t["name"] for t in tools}
     assert {"send_email", "web_search", "get_variable"} <= names
     by_name = {t["name"]: t for t in tools}
-    assert by_name["send_email"]["tier"] == "high"
+    assert by_name["send_email"]["tier"] == "write"
     assert by_name["web_search"]["tier"] == "read"
     assert by_name["set_variable"]["tier"] == "write"
     assert "input_schema" in by_name["send_email"]

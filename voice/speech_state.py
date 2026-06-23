@@ -14,7 +14,8 @@ from enum import Enum
 logger = logging.getLogger("jarvis.voice")
 
 # Grace after TTS starts before VAD barge-in arms (avoids echo / wake residue).
-BARGEIN_GRACE_SEC = 0.8
+# NOTE (Jack): raised 0.8→1.5 to reduce self-trigger from speaker bleed without AEC.
+BARGEIN_GRACE_SEC = 1.5
 
 # Pipeline states where openWakeWord predict must stay off (echo guard).
 WAKE_DETECTION_OFF_STATES = frozenset(

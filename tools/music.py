@@ -122,12 +122,13 @@ end tell
     if platform.system() == "Windows":
         uri = f"spotify:search:{urllib.parse.quote(q)}"
         try:
-            subprocess.run(
-                ["cmd", "/c", "start", "", uri],
-                check=True,
-                timeout=_OSASCRIPT_TIMEOUT,
+            subprocess.Popen(
+                ["powershell", "-NoProfile", "-Command", "Start-Process", uri],
             )
-            return f"Opened Spotify search for '{q}'."
+            return (
+                f"Opened Spotify search for '{q}'. "
+                "I can't control playback on Windows yet — use Spotify directly to play."
+            )
         except Exception as exc:  # noqa: BLE001
             return f"Could not open Spotify: {exc}"
 

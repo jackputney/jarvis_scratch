@@ -64,8 +64,8 @@ def test_elevenlabs_speaks_with_correct_voice_id(monkeypatch):
 def test_elevenlabs_output_format_free_tier():
     from tts import elevenlabs
 
-    assert elevenlabs.OUTPUT_FORMAT == "pcm_16000"
-    assert elevenlabs.ELEVENLABS_SAMPLE_RATE == 16000
+    assert elevenlabs.OUTPUT_FORMAT == "pcm_22050"
+    assert elevenlabs.ELEVENLABS_SAMPLE_RATE == 22050
 
 
 def test_elevenlabs_error_includes_status_code(monkeypatch):
@@ -104,7 +104,7 @@ def test_router_falls_back_to_cartesia_on_tts_error(monkeypatch):
         from tts.router import speak
 
         speak("Fallback please")
-        assert eleven_calls == [1, 1]
+        assert eleven_calls == [1, 1, 1]
         assert cartesia_calls == [("Fallback please", Config().cartesia_voice_id)]
 
 
@@ -219,21 +219,41 @@ def test_router_reloads_voice_after_config_change(temp_env, monkeypatch):
     assert voices == ["JBFqnCBsd6RMkjVDRZzb", "EXAVITQu4vr4xnSDxMaL"]
 
 
-def test_speak_stream_reloads_config_per_chunk(temp_env, monkeypatch):
+def test_speak_stream_starts_before_iterator_exhausted(temp_env, monkeypatch):
+    """Streaming TTS must not wait for the full LLM reply before first audio."""
     monkeypatch.setenv("ELEVENLABS_API_KEY", "test-key")
-    voices: list[str] = []
+    started: list[str] = []
 
-    def fake_elevenlabs(text, voice_id, model_id, on_first_chunk=None):
-        voices.append(voice_id)
+    def fake_elevenlabs_stream(chunks, voice_id, model_id, on_first_chunk=None):
+        first = next(chunks)
+        started.append(first)
+        list(chunks)
 
-    monkeypatch.setattr("tts.elevenlabs.speak", fake_elevenlabs)
+    monkeypatch.setattr("tts.elevenlabs.speak_stream", fake_elevenlabs_stream)
+    from tts.router import speak_stream
+
+    def chunks():
+        yield "First."
+        yield "Second."
+
+    speak_stream(chunks())
+    assert started == ["First."]
+
+
+def test_speak_stream_uses_single_elevenlabs_session(temp_env, monkeypatch):
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "test-key")
+    stream_calls: list[int] = []
+
+    def fake_elevenlabs_stream(chunks, voice_id, model_id, on_first_chunk=None):
+        stream_calls.append(sum(1 for _ in chunks))
+
+    monkeypatch.setattr("tts.elevenlabs.speak_stream", fake_elevenlabs_stream)
     Config.update_persisted({"tts_provider": "elevenlabs", "elevenlabs_voice_id": "JBFqnCBsd6RMkjVDRZzb"})
     from tts.router import speak_stream
 
     def chunks():
         yield "First."
-        Config.update_persisted({"elevenlabs_voice_id": "EXAVITQu4vr4xnSDxMaL"})
         yield "Second."
 
     speak_stream(chunks())
-    assert voices == ["JBFqnCBsd6RMkjVDRZzb", "EXAVITQu4vr4xnSDxMaL"]
+    assert stream_calls == [2]

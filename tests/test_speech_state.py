@@ -103,5 +103,5 @@ def test_wait_for_job_arms_barge_after_grace(monkeypatch, caplog):
     assert any("VAD barge-in armed" in r.message for r in caplog.records)
 
 
-def test_barge_in_grace_is_800ms():
-    assert BARGEIN_GRACE_SEC == 0.8
+def test_barge_in_grace_is_1500ms():
+    assert BARGEIN_GRACE_SEC == 1.5

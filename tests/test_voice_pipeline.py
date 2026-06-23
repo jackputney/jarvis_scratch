@@ -25,6 +25,7 @@ def test_config_voice_tuning_defaults():
     cfg = Config()
     assert cfg.barge_in_threshold == 0.48
     assert cfg.barge_in_hits == 2
+    assert cfg.barge_in_min_ms == 450
     assert cfg.followup_listen_sec == 10
     assert cfg.followup_vad_silence_ms == 1100
     assert cfg.tts_trailing_silence_ms == 80

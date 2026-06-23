@@ -1,7 +1,7 @@
 """dashboard/window.py — Native dashboard window via PyWebView.
 
 Flask keeps serving on 127.0.0.1:7777 (browser fallback). This module opens that
-URL in a real macOS window. Works in dev (run.sh) and frozen (.app) mode.
+URL in a real desktop window (macOS + Windows). Works in dev and frozen builds.
 
 PyWebView must run on a process main thread. When the PyQt6 orb owns the main
 thread, we spawn a dedicated child process for the dashboard window.
@@ -21,6 +21,8 @@ import urllib.request
 from paths import dashboard_url, launched_by_launchd
 
 logger = logging.getLogger("jarvis.dashboard.window")
+
+_NATIVE_WINDOW_PLATFORMS = frozenset({"darwin", "win32"})
 
 _window_thread: threading.Thread | None = None
 _webview_process: multiprocessing.Process | None = None
@@ -50,13 +52,14 @@ def _webview_process_main(url: str) -> None:
         return
 
     window = webview.create_window(
-        "Jarvis Dashboard",
+        "Jarvis",
         url,
         width=1280,
         height=840,
         min_size=(900, 600),
         resizable=True,
         text_select=True,
+        focus=True,
     )
     webview.start(debug=False, private_mode=False)
 
@@ -117,8 +120,8 @@ def _run_dashboard_window() -> None:
 
 
 def start_native_dashboard_window(*, block: bool = False) -> threading.Thread | None:
-    """Launch the dashboard window on macOS (PyWebView subprocess or browser fallback)."""
-    if sys.platform != "darwin":
+    """Launch the dashboard in a native PyWebView window (macOS/Windows)."""
+    if sys.platform not in _NATIVE_WINDOW_PLATFORMS:
         return None
 
     global _window_thread
@@ -139,8 +142,8 @@ def start_native_dashboard_window(*, block: bool = False) -> threading.Thread | 
 
 
 def native_window_supported() -> bool:
-    """True when pywebview is importable on macOS."""
-    if sys.platform != "darwin":
+    """True when pywebview is importable on this desktop platform."""
+    if sys.platform not in _NATIVE_WINDOW_PLATFORMS:
         return False
     try:
         import webview  # noqa: F401

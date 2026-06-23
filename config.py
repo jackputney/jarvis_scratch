@@ -58,6 +58,7 @@ _PERSISTED_FIELDS = (
     "barge_in_enabled",
     "barge_in_threshold",
     "barge_in_hits",
+    "barge_in_min_ms",
     "followup_listen_sec",
     "followup_vad_silence_ms",
     "followup_vad_min_capture_ms",
@@ -119,6 +120,7 @@ class Config:
     barge_in_enabled: bool = True  # say the wake word during a reply to cut it off and ask again
     barge_in_threshold: float = 0.48
     barge_in_hits: int = 2
+    barge_in_min_ms: int = 450  # continuous user speech required to count as a barge-in
     followup_listen_sec: int = 10
     followup_vad_silence_ms: int = 1100
     followup_vad_min_capture_ms: int = 800
@@ -126,7 +128,7 @@ class Config:
     tts_trailing_silence_ms: int = 80
     hotkey_enabled: bool = True  # register a global keyboard shortcut to wake Jarvis
     hotkey_combo: str = "<ctrl>+<shift>+<space>"  # pynput format: <ctrl>/<shift>/<alt>/<cmd> + key
-    dashboard_native_window: bool = True  # open dashboard in PyWebView on macOS (Flask still on :7777)
+    dashboard_native_window: bool = True  # open dashboard in PyWebView (Flask still on :7777)
     memory_inject_last_n_notes: int = 5
     memory_root_path: str = ""
     memory_auto_learn: bool = True
@@ -186,6 +188,7 @@ class Config:
             barge_in_enabled=data.get("barge_in_enabled", cls.barge_in_enabled),
             barge_in_threshold=float(data.get("barge_in_threshold", cls.barge_in_threshold)),
             barge_in_hits=int(data.get("barge_in_hits", cls.barge_in_hits)),
+            barge_in_min_ms=int(data.get("barge_in_min_ms", cls.barge_in_min_ms)),
             followup_listen_sec=int(
                 data.get(
                     "followup_window_seconds",
