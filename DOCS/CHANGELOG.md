@@ -27,6 +27,48 @@
 
 ---
 
+### 2026-06-23 — confirm gate KeyError fix + Oliver sprint-5 review — Jack
+
+[Agent: Cursor — acting for Jack — 2026-06-23]
+
+**Branch:** jack/self-improve (cd84a3d) | **Tests:** 423 passing
+
+**What changed:**
+
+- `orchestrator/runtime.py` — `_sync_legacy` accepts both `state` and `pipeline_state` keys
+- `dashboard/app.py` — SSE `_broadcast` normalises both keys, `/api/state` uses `.get()`
+- `dashboard/tools_run_confirm.py` — added `reset_for_tests()`
+- `tools/confirm.py` — added `reset_for_tests()`
+- `conftest.py` — resets both confirm stores on every test
+
+**Why:** v0.4.0 orchestrator changes introduced `state`/`pipeline_state` key mismatch. Dashboard SSE code expected `pipeline_state`, bus events used `state`. Surfaced as KeyError in high-risk confirm flow. Bug was in main, not Oliver's branch.
+
+**Watch out for:** Any code that reads state snapshots directly with `state["pipeline_state"]` — use `.get()` or normalise via `_sync_legacy`.
+
+---
+
+### 2026-06-23 — Oliver sprint-5 reviewed and approved — Jack
+
+**Branch:** oliver/sprint-5 (pending merge) | **Tests:** 386 pass / 11 pre-existing fails
+
+**What Oliver built:**
+
+- VAD barge-in: 450ms sustained speech + 1.5s grace (stops Windows self-triggering)
+- TTS: pcm_22050 (fuller voice, still free-tier safe), continuous speak_stream session
+- Diary-poison fix: `memory/semantic.py` filters stale Windows refusals from recall
+- `docs/PLATFORM.md`: adapters/ layer proposal — ~80% shared core, ~13 OS-specific files
+- `docs/WINDOWS_SETUP.md`: reproducible Windows env (Python 3.11)
+- STTBackend adapter POC: mlx vs faster-whisper pulled out of `pipeline.py`
+
+**Sign-offs granted:**
+
+- PLATFORM.md adapters/ strategy approved
+- Oliver clear to migrate AudioIO, AppControl, LaunchAtLogin behind adapters
+
+**Watch out for:** `speech_state.py` barge-in thresholds changed — if Mac self-triggers after merge, bump `barge_in_min_ms` back down.
+
+---
+
 ### 2026-06-18 — GitHub self-read tools — Jack
 
 [Agent: Cursor — acting for Jack — 2026-06-18]

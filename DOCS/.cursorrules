@@ -1,0 +1,79 @@
+# ============================================================
+# JARVIS — AI Voice Assistant & Automation Hub
+# Cursor AI Rules — Auto-loaded every session
+# ============================================================
+# Repo: https://github.com/jackputney/jarvis_scratch
+# Team: Jack (macOS / jputney667) + Oliver (Windows / Odugan405)
+# Docs: DOCS/ folder in repo root — read before building anything
+# ============================================================
+# AGENT INSTRUCTIONS
+# Before writing any code:
+#   1. Read DOCS/PROJECT_STATE.md   — current branch, tests, what's broken
+#   2. Read DOCS/ARCHITECTURE.md    — real file structure, how systems connect
+#   3. Read DOCS/CHANGELOG.md       — what changed recently and why
+#   4. Read DOCS/AGENT_PROTOCOL.md  — how to log your work
+# Then build. Then log what you did in DOCS/CHANGELOG.md.
+# ============================================================
+
+## ROLE
+
+You are an AI coding assistant embedded in the Jarvis project.
+You know this codebase deeply. You help Jack and Oliver build
+features, fix bugs, and maintain code quality across Mac and Windows.
+
+Before writing any code, re-read the relevant DOCS/ section.
+When in doubt, ask — don't guess at conventions.
+
+## Key rules
+
+- Data privacy comes first, always.
+- British English in user-facing text and docs.
+- Run pytest before every push (baseline: 413).
+- Never push to main directly — PR + cross-review only.
+- Message the other dev before editing: pipeline.py, main.py, config.py, tools/registry.py, speech_state.py
+- improvement/ has ZERO imports from pipeline.py or registry.py
+- Orb state ONLY via events.set_pipeline_state() — never set orb directly
+- reflect.py uses claude-haiku-4-5 ONLY for suggestions — never sonnet
+- New tools go in tools/<name>.py, registered in tools/registry.py
+- Spec files (*.spec.md) next to code must stay in sync
+
+## Coordinated merge files
+
+pipeline.py · main.py · config.py · tools/registry.py · speech_state.py · events.py · orchestrator/core.py
+
+## Docs to update after changes
+
+| Change type | Update |
+|-------------|--------|
+| Any feature/fix | DOCS/CHANGELOG.md |
+| Branch/status/tests | DOCS/PROJECT_STATE.md |
+| New subsystem/API | DOCS/ARCHITECTURE.md |
+| Self-improvement | DOCS/FEATURE_DOCS/SELF_IMPROVEMENT.md + improvement/improvement.spec.md |
+
+## Platform
+
+- Jack: macOS, mlx-whisper, PyQt6 orb, .app bundle
+- Oliver: Windows, faster-whisper, .exe installer, PowerShell device tools
+- Both: sounddevice, ElevenLabs pcm_16000, Flask dashboard localhost:7777
+
+## Test command
+
+```bash
+pytest -q
+```
+
+Micromamba env: `.mamba_env/` (activate before running tests or the app).
+
+---
+
+## ACTIVE STATE (agents: update this section only each sprint)
+
+| Item | Value |
+|------|-------|
+| Branch | jack/self-improve |
+| Tests | 413 passing |
+| Main tag | v0.4.0 |
+| Pending | jack/self-improve → v0.5.0 (Oliver review) |
+| Acting for | Jack (macOS) |
+
+Last updated: 2026-06-22
