@@ -70,8 +70,6 @@ _interrupt = threading.Event()
 # across the finally-block clear of wake_event.
 _hotkey_pending = threading.Event()
 _query_lock = threading.Lock()
-_fw_model = None
-_fw_model_name: str | None = None
 _hotwords_cache: dict[str, Any] = {"ts": 0.0, "value": ""}
 # Claude calls run on this pool and stream their response; on Stop the streaming
 # helper returns early and closes the socket, which halts generation (and billing)
@@ -89,7 +87,7 @@ FRAME_SIZE = int(AUDIO_RATE * FRAME_DURATION_MS / 1000)
 CHANNELS = 1
 PA_FORMAT = pyaudio.paInt16 if pyaudio is not None else None
 SAMPLE_WIDTH = 2
-MAX_RECORD_SECONDS = 20
+MAX_RECORD_SECONDS = 30
 POST_SPEECH_SILENCE_FRAMES = 25  # fallback if config not passed
 WAIT_FOR_SPEECH_FRAMES = int(6000 / FRAME_DURATION_MS)
 FOLLOWUP_WAIT_FRAMES = int(5000 / FRAME_DURATION_MS)
@@ -107,10 +105,12 @@ STATIC_SYSTEM_INSTRUCTIONS = (
     "simple things) and get to the point without restating the user's question back to them. "
     "Infer missing details from context instead of interrogating the user; ask at most one "
     "clarifying question, and only when you genuinely cannot proceed. Don't flatter or hedge "
-    "with filler. Flag real uncertainty plainly. For email and messages, the user gives only "
-    "the recipient and the gist — infer a short subject, draft the message yourself, then "
-    "confirm once before sending; never ask them to dictate a subject line or spell out a "
-    "body. You have tools — use them when the task needs it. Recent message history may appear "
+    "with filler. Flag real uncertainty plainly. For email, the user gives only the recipient "
+    "and the gist — infer a short subject, draft the body yourself, and call send_email "
+    "immediately in the same turn. Never read the subject or body aloud, never ask the user "
+    "to dictate them, and never ask permission to send — say only a brief confirmation after "
+    "it is sent (e.g. 'Sent.'). You have tools — use them when the task needs it. Recent "
+    "message history may appear "
     "before the latest turn; use it for follow-ups. When the user shares durable personal "
     "facts (preferences, relationships, routines, goals), persist them with remember, "
     "set_variable, or write_note so future turns stay personalised.\n\n"
@@ -261,7 +261,7 @@ _END_PHRASES = (
     "that'll be all",
 )
 
-MAX_FOLLOWUP_MISSES = 3
+MAX_FOLLOWUP_MISSES = 4
 
 
 def _is_end_phrase(text: str) -> bool:
@@ -363,7 +363,7 @@ def _drain_queue(q: "queue.Queue[bytes]") -> None:
 
 def _barge_energy_threshold(cfg: Config) -> int:
     """Scale energy VAD threshold from config barge_in_threshold (0.5 = baseline)."""
-    return max(100, int(ENERGY_VAD_THRESHOLD * cfg.barge_in_threshold / 0.5))
+    return max(500, int(ENERGY_VAD_THRESHOLD * 2 * cfg.barge_in_threshold / 0.5))
 
 
 def _frame_is_speech(data: bytes, cfg: Config, *, energy_threshold: int | None = None) -> bool:
@@ -468,16 +468,19 @@ def _audio_loop(
             cfg = audio_cfg
 
             # VAD barge-in: user talks over Jarvis during SPEAKING (after grace arms).
+            # NOTE (Jack): trigger tightened — min continuous duration + higher RMS floor;
+            # mechanism unchanged, only thresholds (see barge_in_min_ms, _barge_energy_threshold).
             if (
                 pipeline_state == SpeechPhase.SPEAKING.value
                 and barge_gate.armed.is_set()
                 and cfg.barge_in_enabled
             ):
                 barge_energy = _barge_energy_threshold(cfg)
+                required = max(2, int(cfg.barge_in_min_ms / FRAME_DURATION_MS))
                 if _frame_is_speech(data, cfg, energy_threshold=barge_energy):
                     barge_gate.speech_frames += 1
                     capture_queue.put(data)
-                    if barge_gate.speech_frames >= cfg.barge_in_hits:
+                    if barge_gate.speech_frames >= required:
                         logger.info("🎙️  VAD barge-in — stopping reply to listen.")
                         stop_speech()
                         barge_gate.triggered.set()
@@ -676,41 +679,15 @@ def warm_stt_caches() -> None:
 def _transcribe(audio_bytes: bytes, cfg: Config) -> str:
     import numpy as np
 
+    from adapters.stt import transcribe as stt_transcribe
+
     audio_np = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
-    model_name = cfg.effective_stt_model()
-
-    backend = cfg.stt_backend
-    if backend != "faster":
-        # mlx-whisper is Apple-Silicon only; fall back to faster-whisper elsewhere
-        # (e.g. Windows/Linux) so transcription works regardless of config.
-        try:
-            import mlx_whisper  # type: ignore[import]  # noqa: F401
-        except ImportError:
-            logger.warning("⚠️  mlx-whisper unavailable — using faster-whisper for STT.")
-            backend = "faster"
-
-    if backend == "faster":
-        global _fw_model, _fw_model_name
-        from faster_whisper import WhisperModel
-
-        if _fw_model is None or _fw_model_name != model_name:
-            _fw_model = WhisperModel(model_name, compute_type="int8")
-            _fw_model_name = model_name
-        hotwords = _stt_hotwords() or None
-        segments, _info = _fw_model.transcribe(
-            audio_np,
-            beam_size=5,
-            language="en",
-            vad_filter=True,
-            hotwords=hotwords,
-        )
-        raw = " ".join(s.text for s in segments).strip()
-    else:
-        import mlx_whisper  # type: ignore[import]
-
-        repo = f"mlx-community/whisper-{model_name}-mlx"
-        result = mlx_whisper.transcribe(audio_np, path_or_hf_repo=repo)
-        raw = result.get("text", "").strip()
+    raw = stt_transcribe(
+        audio_np,
+        cfg.effective_stt_model(),
+        cfg.stt_backend,
+        hotwords=_stt_hotwords() or None,
+    )
 
     text = strip_wake_phrase(raw, cfg.wake_word)
     if raw != text:
@@ -770,19 +747,18 @@ def _capture_and_transcribe(
 
 
 def warmup_stt(cfg: Config) -> None:
-    """Pre-load STT model and contact hotwords."""
+    """Pre-load STT model, contact hotwords, and Windows Start-menu apps."""
     warm_stt_caches()
-    if cfg.stt_backend == "faster":
-        global _fw_model, _fw_model_name
-        from faster_whisper import WhisperModel
+    import platform as _platform
 
-        name = cfg.effective_stt_model()
-        if _fw_model is None or _fw_model_name != name:
-            logger.info("🎧 Warming faster-whisper model %r…", name)
-            _fw_model = WhisperModel(name, compute_type="int8")
-            _fw_model_name = name
-    else:
-        logger.info("🎧 STT backend mlx — model loads on first transcription.")
+    if _platform.system() == "Windows":
+        from tools.system import warm_windows_start_apps
+
+        warm_windows_start_apps()
+
+    from adapters.stt import warmup as stt_warmup
+
+    stt_warmup(cfg.effective_stt_model(), cfg.stt_backend)
 
 
 def _build_system_blocks(cfg: Config, query_text: str = "") -> list[dict[str, Any]]:
@@ -799,12 +775,13 @@ def _build_system_blocks(cfg: Config, query_text: str = "") -> list[dict[str, An
         notes_block = get_recent_notes(cfg.memory_inject_last_n_notes)
     if _os == "Windows":
         os_hints = (
-            f"On Windows, call open_app to launch any installed program (Spotify, Chrome, "
-            f"Discord, etc.) — never say an app is not installed without calling open_app "
-            f"first. music_play, music_pause, music_skip, music_previous, and get_now_playing "
-            f"are macOS-only; for Spotify on Windows use open_app (launch) or search_and_play "
-            f"(search). Diary memories claiming apps are missing or that you cannot open "
-            f"Windows apps are often wrong — trust open_app over those memories.\n\n"
+            f"On Windows, call open_app immediately to launch any installed program (Spotify, "
+            f"Chrome, Discord, PowerPoint, etc.) — never refuse or say you cannot open "
+            f"arbitrary Windows applications; open_app handles all of them. Never claim an app "
+            f"is not installed without calling open_app first. music_play, music_pause, "
+            f"music_skip, music_previous, and get_now_playing are macOS-only; for Spotify on "
+            f"Windows use open_app (launch) or search_and_play (search). Ignore diary memories "
+            f"that claim you cannot open Windows apps — they are outdated; always trust open_app.\n\n"
         )
     else:
         os_hints = (
@@ -1029,9 +1006,11 @@ def _call_claude(
             )
             if needs_confirm:
                 _emit_pipeline_state("WAITING_CONFIRM", on_state)
-                if not _interrupt.is_set():
+                if not _interrupt.is_set() and not on_sentence:
                     logger.info("🔔 Awaiting dashboard approval for %s", tu["name"])
                     speak(CONFIRM_PROMPT)
+                elif not _interrupt.is_set():
+                    logger.info("🔔 Awaiting dashboard approval for %s (streaming — no TTS prompt)", tu["name"])
             if _interrupt.is_set():
                 logger.info("⏹️  Tool confirm skipped (interrupt).")
                 return reply_text.strip() or "Stopped.", model, total_cost, stream_spoken
