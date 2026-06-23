@@ -969,6 +969,10 @@ CONFIRM_REQUIRED_TOOLS = frozenset({
     "create_pitch_deck",
 })
 
+# Dashboard /api/tools/run two-step confirm. Includes voice auto-allow tools that
+# are still too risky to run from the UI without explicit confirmation.
+DASHBOARD_CONFIRM_TOOLS = CONFIRM_REQUIRED_TOOLS | MODERATE_TOOLS | frozenset({"send_email"})
+
 
 def _format_memory_hits(hits: list[dict]) -> str:
     if not hits:

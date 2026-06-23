@@ -409,7 +409,7 @@ def create_app() -> Flask:
             return jsonify({"ok": False, "error": "inputs must be an object"}), 400
 
         from dashboard.tools_run_confirm import consume, create_pending
-        from tools.registry import CONFIRM_REQUIRED_TOOLS, MODERATE_TOOLS, TOOL_DISPATCH, dispatch_tool
+        from tools.registry import DASHBOARD_CONFIRM_TOOLS, TOOL_DISPATCH, dispatch_tool
 
         if name not in TOOL_DISPATCH:
             return jsonify({"ok": False, "error": f"Unknown tool: {name}"}), 404
@@ -417,7 +417,7 @@ def create_app() -> Flask:
         confirm_id = (body.get("confirm_id") or "").strip()
         confirmed = bool(body.get("confirmed"))
 
-        if name in CONFIRM_REQUIRED_TOOLS or name in MODERATE_TOOLS:
+        if name in DASHBOARD_CONFIRM_TOOLS:
             if confirm_id and confirmed:
                 entry = consume(confirm_id)
                 if entry is None:
