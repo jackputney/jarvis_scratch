@@ -5,13 +5,22 @@ from unittest.mock import patch
 import pytest
 
 from dashboard.app import create_app
+from dashboard.tools_run_confirm import reset_for_tests as reset_tools_run_confirm
 
 
 @pytest.fixture
 def client(temp_env):
+    reset_tools_run_confirm()
     app = create_app()
     app.config.update(TESTING=True)
     return app.test_client()
+
+
+@pytest.fixture(autouse=True)
+def _clear_tools_run_confirm():
+    reset_tools_run_confirm()
+    yield
+    reset_tools_run_confirm()
 
 
 def test_high_risk_tool_requires_confirm(client):
@@ -21,9 +30,10 @@ def test_high_risk_tool_requires_confirm(client):
     })
     assert r.status_code == 200
     body = r.get_json()
-    assert body["confirm_required"] is True
-    assert body["confirm_id"]
-    assert body["tool"] == "send_email"
+    assert body is not None
+    assert body.get("confirm_required") is True
+    assert body.get("confirm_id")
+    assert body.get("tool") == "send_email"
 
 
 def test_high_risk_tool_executes_after_confirm(client):
@@ -32,6 +42,8 @@ def test_high_risk_tool_executes_after_confirm(client):
             "name": "send_email",
             "inputs": {"to": "a@b.com", "subject": "Hi", "body": "Test"},
         }).get_json()
+        assert first is not None, "expected JSON body from confirm step"
+        assert first.get("confirm_id"), f"missing confirm_id: {first!r}"
         second = client.post("/api/tools/run", json={
             "name": "send_email",
             "inputs": {"to": "a@b.com", "subject": "Hi", "body": "Test"},
@@ -39,8 +51,10 @@ def test_high_risk_tool_executes_after_confirm(client):
             "confirmed": True,
         })
     assert second.status_code == 200
-    assert second.get_json()["ok"] is True
-    assert "sent" in second.get_json()["result"].lower()
+    body = second.get_json()
+    assert body is not None
+    assert body.get("ok") is True
+    assert "sent" in (body.get("result") or "").lower()
 
 
 def test_read_only_tool_runs_immediately(client, temp_env):
@@ -50,5 +64,6 @@ def test_read_only_tool_runs_immediately(client, temp_env):
     })
     assert r.status_code == 200
     body = r.get_json()
+    assert body is not None
     assert body.get("confirm_required") is not True
-    assert body["ok"] is True
+    assert body.get("ok") is True

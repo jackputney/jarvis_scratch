@@ -84,6 +84,14 @@ _SSE_QUEUE_MAX = 100
 
 
 def _broadcast(event: str, payload: dict) -> None:
+    if event == "pipeline.state":
+        name = payload.get("state") or payload.get("pipeline_state") or "IDLE"
+        payload = {
+            **payload,
+            "type": payload.get("type", "state"),
+            "state": name,
+            "pipeline_state": name,
+        }
     msg = json.dumps({"event": event, **payload})
     with _sse_lock:
         clients = list(_sse_clients)
@@ -119,13 +127,14 @@ def _pending_confirm() -> dict | None:
 def _initial_sse_payloads() -> list[str]:
     """Catch-up events for new SSE subscribers (state + pending confirm)."""
     state = events.get_state()
+    pipe = state.get("pipeline_state", "IDLE")
     payloads = [
         json.dumps({
             "event": "pipeline.state",
-            "state": state["pipeline_state"],
+            "state": pipe,
             "type": "state",
-            "pipeline_state": state["pipeline_state"],
-            "muted": state["muted"],
+            "pipeline_state": pipe,
+            "muted": state.get("muted", False),
         }),
     ]
     pending = _pending_confirm()
@@ -159,9 +168,9 @@ def create_app() -> Flask:
         cfg = Config.load()
         state = events.get_state()
         return jsonify({
-            "pipeline_state": state["pipeline_state"],
-            "muted": state["muted"],
-            "uptime_seconds": state["uptime_seconds"],
+            "pipeline_state": state.get("pipeline_state", "IDLE"),
+            "muted": state.get("muted", False),
+            "uptime_seconds": state.get("uptime_seconds", 0),
             "models": {
                 "fast": cfg.claude_model_fast,
                 "smart": cfg.claude_model_smart,

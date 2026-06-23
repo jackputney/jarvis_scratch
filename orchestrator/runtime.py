@@ -49,7 +49,9 @@ def get_orchestrator() -> Orchestrator:
 
             def _sync_legacy(event: str, payload: dict) -> None:
                 if event == "pipeline.state":
-                    events.set_pipeline_state(payload.get("state", "IDLE"))
+                    # Orchestrator emits ``state``; older callers used ``pipeline_state``.
+                    name = payload.get("state") or payload.get("pipeline_state") or "IDLE"
+                    events.set_pipeline_state(str(name))
 
             _bus.subscribe(_sync_legacy)
             import pipeline

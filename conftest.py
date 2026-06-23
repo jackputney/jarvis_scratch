@@ -51,4 +51,13 @@ def temp_env(tmp_path, monkeypatch):
 
     events._events.clear()
 
+    try:
+        from dashboard.tools_run_confirm import reset_for_tests as reset_tools_run_confirm
+        from tools.confirm import reset_for_tests as reset_voice_confirm
+
+        reset_tools_run_confirm()
+        reset_voice_confirm()
+    except Exception:  # noqa: BLE001
+        pass
+
     return tmp_path

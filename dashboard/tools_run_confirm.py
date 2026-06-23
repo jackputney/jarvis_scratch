@@ -39,3 +39,9 @@ def _purge_expired_locked() -> None:
     now = time.time()
     for cid in [k for k, v in _pending.items() if now - v["created_at"] > _EXPIRY_SEC]:
         del _pending[cid]
+
+
+def reset_for_tests() -> None:
+    """Clear pending dashboard tool-run confirms between tests."""
+    with _lock:
+        _pending.clear()

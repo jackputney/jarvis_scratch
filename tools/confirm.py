@@ -121,6 +121,15 @@ def wait_for_confirm(
                 _pending = None
 
 
+def reset_for_tests() -> None:
+    """Clear voice-loop confirm state between tests."""
+    global _pending
+    cancel_pending()
+    with _lock:
+        _pending = None
+    _clear_cancel_flag()
+
+
 def format_inputs(inputs: dict) -> str:
     """Compact display string for the dashboard modal."""
     try:
