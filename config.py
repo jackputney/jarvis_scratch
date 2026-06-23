@@ -82,6 +82,8 @@ _PERSISTED_FIELDS = (
     "confirm_timeout_sec",
     "vad_silence_ms",
     "vad_min_capture_ms",
+    "github_repo",
+    "github_branch",
 )
 
 
@@ -144,6 +146,8 @@ class Config:
     confirm_timeout_sec: int = 30
     vad_silence_ms: int = 1400
     vad_min_capture_ms: int = 2500
+    github_repo: str = "jackputney/jarvis_scratch"
+    github_branch: str = "main"
 
     anthropic_api_key: str = field(default="", repr=False)
     openai_api_key: str = field(default="", repr=False)
@@ -229,6 +233,8 @@ class Config:
             confirm_timeout_sec=data.get("confirm_timeout_sec", cls.confirm_timeout_sec),
             vad_silence_ms=data.get("vad_silence_ms", cls.vad_silence_ms),
             vad_min_capture_ms=data.get("vad_min_capture_ms", cls.vad_min_capture_ms),
+            github_repo=data.get("github_repo", cls.github_repo),
+            github_branch=data.get("github_branch", cls.github_branch),
         )
 
         cfg.anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY", "")

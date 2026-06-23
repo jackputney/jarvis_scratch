@@ -16,6 +16,7 @@ from improvement.trace import _enqueue, _utc_now_iso, flush_writes
 logger = logging.getLogger("jarvis.improvement.reflect")
 
 METRIC_THRESHOLD = 0.10
+HIGH_TOOL_ERROR_RATE = 0.20
 VALID_SEVERITIES = frozenset({"low", "medium", "high", "critical"})
 
 _DEP_PACKAGES = ("anthropic", "elevenlabs", "openwakeword")
@@ -134,6 +135,82 @@ def _parse_json_object(text: str) -> dict[str, Any]:
     return {}
 
 
+def _append_source_snippet(
+    proposed_change: str,
+    *,
+    source_path: str | None,
+    source_code: str | None,
+    max_lines: int = 40,
+) -> str:
+    if not source_path or not source_code:
+        return proposed_change
+    from tools.github_self import numbered_snippet
+
+    block = numbered_snippet(source_code, max_lines=max_lines)
+    if block in proposed_change:
+        return proposed_change
+    return (
+        f"{proposed_change.rstrip()}\n\n"
+        f"Current code ({source_path}):\n```\n{block}\n```"
+    )
+
+
+def _haiku_tool_suggestion(
+    cfg: Config,
+    *,
+    tool_name: str,
+    error_rate: float,
+    errors: int,
+    calls: int,
+    source_path: str | None,
+    source_code: str | None,
+    evidence: dict[str, Any],
+) -> SuggestionDraft | None:
+    if not (cfg.anthropic_api_key or "").strip():
+        return None
+    from llm import get_llm_client
+    from tools.github_self import numbered_snippet
+
+    model = cfg.claude_model_fast
+    client = get_llm_client(cfg, timeout=45.0, provider="anthropic")
+    code_block = numbered_snippet(source_code or "", max_lines=60) if source_code else "(source not available)"
+    prompt = (
+        "You analyse Jarvis voice-assistant tool failures and propose one concrete code fix.\n"
+        f"Tool: {tool_name}\n"
+        f"Error rate: {error_rate:.0%} ({errors} errors / {calls + errors} invocations)\n"
+        f"Evidence: {json.dumps(evidence, default=str)[:2000]}\n\n"
+        f"Source file: {source_path or 'unknown'}\n"
+        f"Numbered source:\n{code_block}\n\n"
+        "Respond with JSON only:\n"
+        '{"title": str, "body": str, "category": "tools", "severity": "low|medium|high|critical", '
+        '"proposed_change": str}\n'
+        "proposed_change must cite specific line numbers from the numbered source and show "
+        "concrete before/after edits. Include a short quoted snippet of the current code. "
+        "No markdown fences in JSON values."
+    )
+    try:
+        response = client.messages.create(
+            model=model,
+            max_tokens=900,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        blocks = getattr(response, "content", [])
+        text = "".join(getattr(b, "text", "") for b in blocks if getattr(b, "type", "") == "text")
+        parsed = _parse_json_object(text)
+        if not parsed:
+            return None
+        draft = SuggestionDraft.from_llm_json(parsed, category="tools", evidence=evidence)
+        draft.proposed_change = _append_source_snippet(
+            draft.proposed_change,
+            source_path=source_path,
+            source_code=source_code,
+        )
+        return draft
+    except Exception as exc:  # noqa: BLE001
+        logger.error("⚠️  Haiku tool reflection failed: %s", exc, exc_info=True)
+        return None
+
+
 def _haiku_suggestion(
     cfg: Config,
     *,
@@ -206,7 +283,9 @@ def _metric_suggestions(cfg: Config, stats: dict[str, Any], turns: list[dict[str
     return drafts
 
 
-def _tool_offender_suggestions(stats: dict[str, Any]) -> list[SuggestionDraft]:
+def _tool_offender_suggestions(cfg: Config, stats: dict[str, Any]) -> list[SuggestionDraft]:
+    from tools.github_self import resolve_tool_source_path
+
     drafts: list[SuggestionDraft] = []
     for tool in stats.get("top_tools", []):
         errors = int(tool.get("error_count", 0))
@@ -217,7 +296,37 @@ def _tool_offender_suggestions(stats: dict[str, Any]) -> list[SuggestionDraft]:
         if rate <= METRIC_THRESHOLD:
             continue
         name = tool.get("name", "unknown")
-        severity = "high" if rate > 0.25 else "medium"
+        source_path, source_code = resolve_tool_source_path(name)
+        evidence: dict[str, Any] = {"tool": tool, "error_rate": rate}
+        if source_path:
+            evidence["source_path"] = source_path
+
+        if rate > HIGH_TOOL_ERROR_RATE:
+            draft = _haiku_tool_suggestion(
+                cfg,
+                tool_name=name,
+                error_rate=rate,
+                errors=errors,
+                calls=calls,
+                source_path=source_path,
+                source_code=source_code,
+                evidence=evidence,
+            )
+            if draft is not None:
+                drafts.append(draft)
+                continue
+
+        severity = "high" if rate > HIGH_TOOL_ERROR_RATE else "medium"
+        proposed = (
+            f"Inspect recent tool_error events for `{name}`; add validation or "
+            f"clearer user-facing errors before retry."
+        )
+        proposed = _append_source_snippet(
+            proposed,
+            source_path=source_path,
+            source_code=source_code,
+            max_lines=20,
+        )
         drafts.append(
             SuggestionDraft(
                 title=f"Tool {name} failing often",
@@ -227,11 +336,8 @@ def _tool_offender_suggestions(stats: dict[str, Any]) -> list[SuggestionDraft]:
                 ),
                 category="tools",
                 severity=severity,
-                proposed_change=(
-                    f"Inspect recent tool_error events for `{name}`; add validation or "
-                    f"clearer user-facing errors before retry."
-                ),
-                evidence_json=json.dumps({"tool": tool, "error_rate": rate}, default=str),
+                proposed_change=proposed,
+                evidence_json=json.dumps(evidence, default=str),
             )
         )
     return drafts[:3]
@@ -274,7 +380,7 @@ def run_reflection() -> list[dict[str, Any]]:
     turns = fetch_turns(limit=100)
     drafts: list[SuggestionDraft] = []
     drafts.extend(_metric_suggestions(cfg, stats, turns))
-    drafts.extend(_tool_offender_suggestions(stats))
+    drafts.extend(_tool_offender_suggestions(cfg, stats))
     drafts.extend(_dep_upgrade_suggestions(cfg))
 
     saved: list[dict[str, Any]] = []

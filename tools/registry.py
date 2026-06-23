@@ -49,6 +49,13 @@ from tools.pitch_deck import create_pitch_deck
 from memory.semantic import remember as remember_fact, search as search_memory_index
 from memory.variables import get_variable, set_variable
 from tools.github import create_github_comment, get_github_repo_summary, search_github_issues
+from tools.github_self import (
+    get_own_commits,
+    get_own_issues,
+    list_own_files,
+    read_own_file,
+    search_own_code,
+)
 from tools.google_calendar import get_calendar_events, get_todays_schedule
 from tools.google_contacts import list_contacts, search_contacts
 from tools.google_drive import read_drive_file, search_drive
@@ -742,6 +749,61 @@ TOOL_DEFINITIONS: list[dict] = [
             "required": ["repo", "issue_number", "body"],
         },
     },
+    {
+        "name": "read_own_file",
+        "description": "Read a source file from Jarvis's own GitHub repo (read-only).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Repo-relative file path, e.g. tools/web.py."},
+            },
+            "required": ["path"],
+        },
+    },
+    {
+        "name": "list_own_files",
+        "description": "List file paths in a directory of Jarvis's own GitHub repo.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "directory": {"type": "string", "description": "Repo-relative directory (empty for repo root)."},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "search_own_code",
+        "description": "Search code in Jarvis's own GitHub repository.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Code search query."},
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "get_own_commits",
+        "description": "Recent commits on Jarvis's own repo main branch.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "description": "Number of commits (default 10, max 30)."},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "get_own_issues",
+        "description": "List open or closed issues on Jarvis's own GitHub repo.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "state": {"type": "string", "description": "open, closed, or all (default open)."},
+            },
+            "required": [],
+        },
+    },
 ]
 
 # ---------------------------------------------------------------------------
@@ -821,6 +883,11 @@ TOOL_DISPATCH: dict[str, callable] = {
     "create_github_comment": lambda **kw: create_github_comment(
         kw["repo"], int(kw["issue_number"]), kw["body"],
     ),
+    "read_own_file": lambda **kw: read_own_file(kw["path"]),
+    "list_own_files": lambda **kw: list_own_files(kw.get("directory", "")),
+    "search_own_code": lambda **kw: search_own_code(kw["query"]),
+    "get_own_commits": lambda **kw: get_own_commits(int(kw.get("limit") or 10)),
+    "get_own_issues": lambda **kw: get_own_issues(kw.get("state", "open")),
 }
 
 # Read-only tools — never confirm.
@@ -844,6 +911,11 @@ READ_ONLY_TOOLS = frozenset({
     "read_slack_channel",
     "search_github_issues",
     "get_github_repo_summary",
+    "read_own_file",
+    "list_own_files",
+    "search_own_code",
+    "get_own_commits",
+    "get_own_issues",
     "get_battery_status",
     "get_system_info",
     "find_file",
