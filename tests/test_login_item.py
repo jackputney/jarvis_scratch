@@ -1,4 +1,4 @@
-"""tests/test_login_item.py — macOS Launch at login tools and API."""
+"""tests/test_login_item.py — Launch at login tools and API."""
 
 from __future__ import annotations
 
@@ -27,7 +27,8 @@ def test_login_tools_registered():
     names = {t["name"] for t in TOOL_DEFINITIONS}
     assert "enable_login_item" in names
     assert "disable_login_item" in names
-    assert MODERATE_TOOLS >= {"enable_login_item", "disable_login_item"}
+    assert "manage_startup" in names
+    assert MODERATE_TOOLS >= {"enable_login_item", "disable_login_item", "manage_startup"}
 
 
 def test_moderate_tools_require_confirm_in_voice():
@@ -39,11 +40,85 @@ def test_moderate_tools_require_confirm_in_voice():
     assert "not executed" in result
 
 
-def test_enable_login_item_non_macos():
-    with patch("platform.system", return_value="Windows"):
+def test_enable_login_item_unsupported_platform():
+    with patch("platform.system", return_value="Linux"):
         from tools.login_item import enable_login_item
 
-        assert "macOS only" in enable_login_item()
+        assert "not supported" in enable_login_item()
+
+
+def test_manage_startup_invalid_action():
+    from tools.login_item import manage_startup
+
+    assert "Refused" in manage_startup("reboot")
+
+
+def test_manage_startup_status_windows(monkeypatch):
+    monkeypatch.setattr("platform.system", lambda: "Windows")
+    monkeypatch.setattr("tools.login_item._is_windows_startup_enabled", lambda: True)
+    monkeypatch.setattr("paths.is_frozen", lambda: False)
+
+    from tools.login_item import manage_startup
+
+    result = manage_startup("status")
+    assert "enabled" in result
+    assert "Windows" in result
+
+
+def test_enable_login_item_windows_calls_schtasks(tmp_path, monkeypatch):
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "run.ps1").write_text("# jarvis\n", encoding="utf-8")
+
+    monkeypatch.setattr("platform.system", lambda: "Windows")
+    monkeypatch.setattr("paths.bundle_root", lambda: root)
+    monkeypatch.setattr("paths.is_frozen", lambda: False)
+    rec: dict = {}
+
+    def fake_schtasks(*args):
+        rec["args"] = args
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("tools.login_item._run_schtasks", fake_schtasks)
+
+    from tools.login_item import enable_login_item
+
+    result = enable_login_item()
+    assert "enabled" in result.lower()
+    assert rec["args"][0] == "/Create"
+    assert rec["args"][1] == "/TN"
+    assert "run.ps1" in rec["args"][rec["args"].index("/TR") + 1]
+
+
+def test_disable_login_item_windows_calls_schtasks(monkeypatch):
+    monkeypatch.setattr("platform.system", lambda: "Windows")
+    monkeypatch.setattr("tools.login_item._is_windows_startup_enabled", lambda: True)
+    rec: dict = {}
+
+    def fake_schtasks(*args):
+        rec["args"] = args
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("tools.login_item._run_schtasks", fake_schtasks)
+
+    from tools.login_item import disable_login_item
+
+    result = disable_login_item()
+    assert "disabled" in result.lower()
+    assert rec["args"][:3] == ("/Delete", "/TN", "Jarvis")
+
+
+def test_is_login_item_enabled_windows(monkeypatch):
+    monkeypatch.setattr("platform.system", lambda: "Windows")
+
+    def fake_schtasks(*args):
+        return MagicMock(returncode=0 if args[0] == "/Query" else 1, stdout="", stderr="")
+
+    monkeypatch.setattr("tools.login_item._run_schtasks", fake_schtasks)
+
+    from tools.login_item import is_login_item_enabled
+
+    assert is_login_item_enabled() is True
 
 
 @darwin_only

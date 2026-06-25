@@ -25,7 +25,7 @@ from tools.device_control import (
     set_wifi,
 )
 from tools.download import download_file
-from tools.login_item import disable_login_item, enable_login_item, is_login_item_enabled
+from tools.login_item import disable_login_item, enable_login_item, is_login_item_enabled, manage_startup
 from tools.media import (
     find_and_open_file,
     find_file,
@@ -216,6 +216,23 @@ TOOL_DEFINITIONS: list[dict] = [
         "name": "disable_login_item",
         "description": "Disable Launch at login on macOS so Jarvis no longer starts automatically.",
         "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "manage_startup",
+        "description": (
+            "Enable, disable, or check Jarvis launch-at-login status. macOS uses LaunchAgent; "
+            "Windows uses Task Scheduler to run run.ps1 at user logon."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "description": "One of: enable, disable, status.",
+                },
+            },
+            "required": ["action"],
+        },
     },
     {
         "name": "music_play",
@@ -828,6 +845,7 @@ TOOL_DISPATCH: dict[str, callable] = {
     "set_screen_saver": lambda **kw: set_screen_saver(kw.get("action", "start")),
     "enable_login_item": lambda **kw: enable_login_item(),
     "disable_login_item": lambda **kw: disable_login_item(),
+    "manage_startup": lambda **kw: manage_startup(kw["action"]),
     "music_play": lambda **kw: music_play(),
     "music_pause": lambda **kw: music_pause(),
     "music_skip": lambda **kw: music_skip(),
@@ -950,6 +968,7 @@ AUTO_ALLOW_TOOLS = frozenset({
 MODERATE_TOOLS = frozenset({
     "enable_login_item",
     "disable_login_item",
+    "manage_startup",
     "music_play",
     "music_pause",
     "music_skip",
