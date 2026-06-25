@@ -27,6 +27,24 @@
 
 ---
 
+### 2026-06-25 — terminal shutdown and empty-follow-up loop fix — Jack
+
+[Agent: Cursor — acting for Jack — 2026-06-25]
+
+**Branch:** jack/sprint-6 | **Tests:** 440 passing
+
+**What changed:**
+- `main.py` — Ctrl+C/SIGTERM now requests pipeline interrupt, runs graceful shutdown, quits Qt, and exits explicitly; headless mode uses the same shutdown path.
+- `pipeline.py` — follow-up empty-capture tolerance is capped at 3 misses and returns to `IDLE` when exhausted; barge-in follow-up now breaks instead of looping forever on empty STT.
+- `tests/test_main_shutdown.py` — covers the UI shutdown helper.
+- `tests/test_voice_pipeline.py` — covers the 3-miss follow-up limit and `IDLE` return.
+
+**Why:** Ctrl+C could leave Jarvis stuck in a repeated "Nothing intelligible heard" listen loop, requiring terminal closure.
+
+**Watch out for:** This touches coordinated files `main.py` and `pipeline.py`; Oliver should rebase `oliver/sprint-6` before merging AudioIO changes.
+
+---
+
 ### 2026-06-23 — GitHub write access — Jack
 
 [Agent: Cursor — acting for Jack — 2026-06-23]

@@ -7,10 +7,10 @@
 
 | Item | Value |
 |------|-------|
-| Tests | 423 passing |
+| Tests | 440 passing |
 | Main tag | v0.4.0 |
 | Pending merge | jack/self-improve → v0.5.0 |
-| Jack branch | jack/self-improve |
+| Jack branch | jack/sprint-6 |
 | Oliver branch | oliver/sprint-4 (merged at v0.4.0) |
 
 ## What's on main (v0.4.0)
@@ -42,7 +42,7 @@
 |-------|----------|--------|
 | jack/self-improve not merged to main yet | High | Waiting Oliver review |
 | Self-improvement Stage 2–4 not started | Medium | Next after v0.5.0 |
-| Abort trap on Ctrl+C | Low | Cosmetic — PyQt6 shutdown quirk |
+| Ctrl+C shutdown hang | Low | Fixed on `jack/sprint-6`; verify after restart |
 | Home Assistant tools not implemented | Low | Hub UI exists, no tools |
 | Notion out of free blocks | Low | Migrating to DOCS/ markdown |
 | ElevenLabs free tier 10k chars/month | Low | Upgrade for daily use |

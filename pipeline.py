@@ -274,7 +274,7 @@ _END_PHRASES = (
     "that'll be all",
 )
 
-MAX_FOLLOWUP_MISSES = 4
+MAX_FOLLOWUP_MISSES = 3
 
 
 def _is_end_phrase(text: str) -> bool:
@@ -334,6 +334,7 @@ def _await_followup_utterance(
                 return None
             return text
         misses += 1
+    set_state("IDLE")
     return None
 
 
@@ -1414,6 +1415,8 @@ def run_pipeline(
                             text = _await_followup_utterance(
                                 capture_queue, capturing, paused, cfg, set_state, wake_event,
                             )
+                        if text is None:
+                            break
                         continue
 
                     if _interrupt.is_set():
