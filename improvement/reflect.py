@@ -176,22 +176,28 @@ def _create_github_tracking_for_suggestion(suggestion: dict[str, Any]) -> dict[s
 
     logger.warning("⚠️  GitHub issue not created for suggestion %s: %s", sid, err)
     flush_writes()
-    return {"ok": True, "github_issue_url": None, "error": err, "branch_url": branch_url}
+    return {"ok": False, "github_issue_url": None, "error": err, "branch_url": branch_url}
 
 
 def accept_suggestion(suggestion_id: str) -> dict[str, Any]:
-    """Mark accepted and open a GitHub tracking issue + branch."""
+    """Mark accepted and open a GitHub tracking issue + branch.
+
+    Idempotent: if the suggestion is already accepted with a GitHub issue URL,
+    returns the existing URL without creating a second issue.  If a previous
+    accept run set status=accepted but failed before creating the issue, we
+    retry the GitHub work without re-writing the DB status.
+    """
     suggestion = fetch_suggestion_by_id(suggestion_id)
     if suggestion is None:
         return {"ok": False, "error": "not found"}
-    if suggestion.get("status") == "accepted" and suggestion.get("github_issue_url"):
+    if suggestion.get("github_issue_url"):
         return {"ok": True, "github_issue_url": suggestion["github_issue_url"]}
-    if not update_suggestion_status(suggestion_id, "accepted"):
-        return {"ok": False, "error": "not found"}
-    suggestion["status"] = "accepted"
-    result = _create_github_tracking_for_suggestion(suggestion)
-    result.setdefault("ok", True)
-    return result
+    already_accepted = suggestion.get("status") == "accepted"
+    if not already_accepted:
+        if not update_suggestion_status(suggestion_id, "accepted"):
+            return {"ok": False, "error": "not found"}
+        suggestion["status"] = "accepted"
+    return _create_github_tracking_for_suggestion(suggestion)
 
 
 def update_suggestion_status(suggestion_id: str, status: str) -> bool:

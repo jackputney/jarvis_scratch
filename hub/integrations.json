@@ -134,7 +134,7 @@
     "auth_type": "api_key",
     "required": false,
     "fields": [
-      { "key": "GITHUB_PAT", "label": "Personal access token (read-only)", "required": true, "secret": true, "placeholder": "ghp_..." }
+      { "key": "GITHUB_PAT", "label": "Personal access token (repo scope — read + write)", "required": true, "secret": true, "placeholder": "ghp_..." }
     ],
     "repo": "jackputney/jarvis_scratch",
     "docs_url": "https://github.com/settings/tokens"

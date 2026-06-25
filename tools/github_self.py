@@ -343,6 +343,7 @@ def get_own_issues_results(state: str = "open") -> tuple[list[dict[str, Any]], s
             "body": (item.get("body") or "")[:500],
             "labels": labels,
             "created_at": item.get("created_at", ""),
+            "html_url": item.get("html_url", ""),
         })
     return out, None
 

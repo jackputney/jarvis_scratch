@@ -1787,8 +1787,12 @@ $("thinks-cards").addEventListener("click", async (e) => {
   const dismiss = e.target.closest(".thinks-dismiss");
   const copyBtn = e.target.closest(".thinks-copy");
   if (accept) {
-    await sendJSON(`/api/improvement/suggestions/${encodeURIComponent(accept.dataset.id)}/accept`, "POST");
-    showToast("Accepted", "ok");
+    const res = await sendJSON(`/api/improvement/suggestions/${encodeURIComponent(accept.dataset.id)}/accept`, "POST");
+    if (res && res.ok === false) {
+      showToast(res.error || "GitHub issue creation failed", "err", 6000);
+    } else {
+      showToast(res && res.github_issue_url ? `Issue opened ✓` : "Accepted (GitHub issue pending)", "ok");
+    }
     loadThinksView();
   } else if (dismiss) {
     await sendJSON(`/api/improvement/suggestions/${encodeURIComponent(dismiss.dataset.id)}/dismiss`, "POST");
