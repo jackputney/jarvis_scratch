@@ -1782,16 +1782,27 @@ async function generateThinks() {
 
 $("thinks-refresh").onclick = () => generateThinks();
 
+// Track in-flight accept requests to prevent double-submission
+const _acceptInFlight = new Set();
+
 $("thinks-cards").addEventListener("click", async (e) => {
   const accept = e.target.closest(".thinks-accept");
   const dismiss = e.target.closest(".thinks-dismiss");
   const copyBtn = e.target.closest(".thinks-copy");
   if (accept) {
-    const res = await sendJSON(`/api/improvement/suggestions/${encodeURIComponent(accept.dataset.id)}/accept`, "POST");
-    if (res && res.ok === false) {
-      showToast(res.error || "GitHub issue creation failed", "err", 6000);
-    } else {
-      showToast(res && res.github_issue_url ? `Issue opened ✓` : "Accepted (GitHub issue pending)", "ok");
+    const sid = accept.dataset.id;
+    if (_acceptInFlight.has(sid)) return; // debounce: already in progress
+    _acceptInFlight.add(sid);
+    accept.disabled = true;
+    try {
+      const res = await sendJSON(`/api/improvement/suggestions/${encodeURIComponent(sid)}/accept`, "POST");
+      if (res && res.ok === false) {
+        showToast(res.error || "GitHub issue creation failed", "err", 6000);
+      } else {
+        showToast(res && res.github_issue_url ? `Issue opened ✓` : "Accepted (GitHub issue pending)", "ok");
+      }
+    } finally {
+      _acceptInFlight.delete(sid);
     }
     loadThinksView();
   } else if (dismiss) {

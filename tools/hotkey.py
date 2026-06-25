@@ -23,6 +23,7 @@ from collections.abc import Callable
 logger = logging.getLogger("jarvis.hotkey")
 
 _listener_thread: threading.Thread | None = None
+_active_listener: object | None = None  # pynput GlobalHotKeys instance
 
 # Map of loose aliases → pynput canonical tokens.
 _ALIASES: dict[str, str] = {
@@ -94,13 +95,17 @@ def start_hotkey_listener(
             logger.error("⚠️  Hotkey callback raised: %s", exc)
 
     def _run() -> None:
+        global _active_listener
         from pynput import keyboard
 
         try:
             with keyboard.GlobalHotKeys({normalized: _fire}) as listener:
+                _active_listener = listener
                 listener.join()
         except Exception as exc:  # noqa: BLE001
             logger.error("⚠️  Global hotkey listener stopped unexpectedly: %s", exc)
+        finally:
+            _active_listener = None
 
     t = threading.Thread(target=_run, daemon=True, name="jarvis-hotkey")
     t.start()
@@ -110,6 +115,12 @@ def start_hotkey_listener(
 
 
 def stop_hotkey_listener() -> None:
-    """Best-effort stop.  The thread is a daemon so it exits with the process."""
-    global _listener_thread
+    """Stop the active global hotkey listener and its background thread."""
+    global _listener_thread, _active_listener
+    if _active_listener is not None:
+        try:
+            _active_listener.stop()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("stop_hotkey_listener: %s", exc)
+    _active_listener = None
     _listener_thread = None

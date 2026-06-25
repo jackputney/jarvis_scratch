@@ -27,6 +27,27 @@
 
 ---
 
+### 2026-06-25 — resolve 4 flagged audit items + sessions.spec.md — Jack
+
+[Agent: Cursor — acting for Jack — 2026-06-25]
+
+**Branch:** jack/sprint-8 | **Tests:** 526 passing
+
+**What changed:**
+- `tools/github.py` — `search_github_issues` now uses `/search/issues` when a query is provided (the list endpoint ignores `q`); scopes query with `repo:owner/repo is:issue is:state`.
+- `tools/hotkey.py` — `_active_listener` stores the live pynput `GlobalHotKeys` instance; `stop_hotkey_listener()` calls `.stop()` on it and clears both refs. Thread now actually exits on stop.
+- `tools/media.py` — `open_photos(query)` now opens `photos://search?q={encoded}` URL scheme (macOS 13+) with AppleScript fallback; query is passed to the system rather than silently ignored.
+- `dashboard/static/app.js` — accept button uses `_acceptInFlight` Set to prevent double-submission; button disabled during the request, re-enabled on completion.
+- `DOCS/sessions.spec.md` — full interface contract for Phase 1 sessions architecture: `Session`, `SessionStore`, `VoiceLane`, `BackgroundLane`, `Turn`, EventBus event payloads, pipeline.py change summary, open questions for Oliver, migration path.
+- `DOCS/TOOLS_AUDIT.md` — flagged items marked resolved.
+- Tests: 9 new tests covering all 4 fixes (see test files).
+
+**Why:** Closes all 4 items flagged during the sprint-8 audit pass. Sessions spec establishes the interface contract before Jack and Oliver start implementation.
+
+**Watch out for:** `photos://search?q=` requires macOS 13+; on earlier macOS the fallback activates Photos without searching (documented in the test). The sessions spec is a design doc only — `orchestrator/session.py` and `orchestrator/lanes.py` do not exist yet.
+
+---
+
 ### 2026-06-25 — full tools audit and debug pass — Jack
 
 [Agent: Cursor — acting for Jack — 2026-06-25]

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import platform
 import subprocess
+import urllib.parse
 from pathlib import Path
 
 _TIMEOUT = 10
@@ -25,12 +26,23 @@ def _darwin_only(feature: str) -> str | None:
 
 
 def open_photos(query: str = "") -> str:
-    """Open the Photos app, optionally searching for a query."""
+    """Open the Photos app, optionally searching for a query via the photos:// URL scheme."""
     blocked = _darwin_only("Photos app control")
     if blocked:
         return blocked
     try:
         if query:
+            # The photos://search?q= URL scheme triggers an in-app search on macOS 13+.
+            encoded = urllib.parse.quote(query, safe="")
+            result = subprocess.run(
+                ["open", f"photos://search?q={encoded}"],
+                capture_output=True,
+                text=True,
+                timeout=_TIMEOUT,
+            )
+            if result.returncode == 0:
+                return f"Opened Photos and searched for: {query}"
+            # Fallback: just activate the app if the URL scheme isn't supported
             subprocess.run(
                 ["osascript", "-e", 'tell application "Photos" to activate'],
                 capture_output=True,

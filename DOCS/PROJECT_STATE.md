@@ -7,10 +7,10 @@
 
 | Item | Value |
 |------|-------|
-| Tests | 517 passing on macOS (sprint-8); 497+ on Windows |
+| Tests | 526 passing on macOS (sprint-8 full); 497+ on Windows |
 | Main tag | v0.5.0 (eced13b); sprint-6 work merged on top |
 | Branch | `main` — all work consolidated |
-| Jack branch | `jack/sprint-6` (merged into main) |
+| Jack branch | `jack/sprint-8` — tools audit + sessions spec, PR #8 open |
 | Oliver branch | `oliver/sprint-6` (merged into main) |
 
 ## What's on main (v0.5.0)
