@@ -24,14 +24,16 @@ def test_open_downloads_registered():
 
 
 def test_find_file_no_results():
-    with patch("tools.media.subprocess.run") as mock_run:
+    with patch("tools.media.platform.system", return_value="Darwin"), \
+         patch("tools.media.subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(stdout="", returncode=0, stderr="")
         result = find_file("xyznonexistentfile12345")
         assert "No files found" in result
 
 
 def test_find_file_returns_results():
-    with patch("tools.media.subprocess.run") as mock_run:
+    with patch("tools.media.platform.system", return_value="Darwin"), \
+         patch("tools.media.subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(
             stdout="/Users/test/Documents/report.pdf\n/Users/test/Downloads/report2.pdf",
             returncode=0,

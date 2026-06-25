@@ -340,6 +340,15 @@ def _run_headless(cfg: Config) -> None:
             _scheduler.shutdown()
 
 
+def _ensure_stdio_utf8() -> None:
+    """Windows consoles often default to cp1252; banner emoji need UTF-8."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def _setup_logging() -> None:
     handlers: list[logging.Handler] = [logging.StreamHandler()]
     if is_frozen():
@@ -349,6 +358,7 @@ def _setup_logging() -> None:
 
 
 def main() -> None:
+    _ensure_stdio_utf8()
     _setup_logging()
 
     if needs_onboarding():

@@ -17,6 +17,10 @@ def create_pitch_deck(
     output_dir: str = "",
 ) -> str:
     """Generate a pitch deck .pptx file on the topic with slide_count slides."""
+    topic = (topic or "").strip()
+    if not topic:
+        return "Refused: topic is required."
+
     try:
         from pptx import Presentation
         from pptx.dml.color import RGBColor
@@ -24,10 +28,6 @@ def create_pitch_deck(
         from pptx.util import Inches, Pt
     except ImportError:
         return "python-pptx is not installed. Run: pip install python-pptx"
-
-    topic = (topic or "").strip()
-    if not topic:
-        return "Refused: topic is required."
 
     try:
         slide_count = max(1, min(int(slide_count), 15))

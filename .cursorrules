@@ -28,7 +28,7 @@ When in doubt, ask — don't guess at conventions.
 
 - Data privacy comes first, always.
 - British English in user-facing text and docs.
-- Run pytest before every push (baseline: 413).
+- Run pytest before every push (baseline: 423).
 - Never push to main directly — PR + cross-review only.
 - Message the other dev before editing: pipeline.py, main.py, config.py, tools/registry.py, speech_state.py
 - improvement/ has ZERO imports from pipeline.py or registry.py
@@ -54,7 +54,7 @@ pipeline.py · main.py · config.py · tools/registry.py · speech_state.py · e
 
 - Jack: macOS, mlx-whisper, PyQt6 orb, .app bundle
 - Oliver: Windows, faster-whisper, .exe installer, PowerShell device tools
-- Both: sounddevice, ElevenLabs pcm_16000, Flask dashboard localhost:7777
+- Both: sounddevice, ElevenLabs pcm_22050, Flask dashboard localhost:7777
 
 ## Test command
 
@@ -70,10 +70,10 @@ Micromamba env: `.mamba_env/` (activate before running tests or the app).
 
 | Item | Value |
 |------|-------|
-| Branch | jack/self-improve |
-| Tests | 413 passing |
-| Main tag | v0.4.0 |
-| Pending | jack/self-improve → v0.5.0 (Oliver review) |
-| Acting for | Jack (macOS) |
+| Branch | main / oliver/sprint-6 |
+| Tests | 423 passing (Mac); ~429 on Windows after platform test fixes |
+| Main tag | **v0.5.0** |
+| Pending | Adapter layer (AudioIO next); self-improvement Stage 2 |
+| Acting for | Oliver (Windows) |
 
-Last updated: 2026-06-22
+Last updated: 2026-06-24

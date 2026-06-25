@@ -34,13 +34,22 @@ def test_user_data_root_is_project_in_dev():
 
 
 def test_frozen_paths_use_meipass_and_app_support(tmp_path, monkeypatch):
+    import sys as _sys
+
     bundle = tmp_path / "bundle"
     bundle.mkdir()
     (bundle / ".env.example").write_text("ANTHROPIC_API_KEY=your_key\n", encoding="utf-8")
-    support = tmp_path / "Library" / "Application Support" / "Jarvis"
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setattr(sys, "frozen", True, raising=False)
-    monkeypatch.setattr(sys, "_MEIPASS", str(bundle), raising=False)
+    if _sys.platform == "darwin":
+        support = tmp_path / "Library" / "Application Support" / "Jarvis"
+        monkeypatch.setenv("HOME", str(tmp_path))
+    elif _sys.platform == "win32":
+        support = tmp_path / "Jarvis"
+        monkeypatch.setenv("APPDATA", str(tmp_path))
+    else:
+        support = tmp_path / ".local" / "share" / "jarvis"
+        monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(_sys, "frozen", True, raising=False)
+    monkeypatch.setattr(_sys, "_MEIPASS", str(bundle), raising=False)
 
     assert bundle_root() == bundle
     assert user_data_root() == support

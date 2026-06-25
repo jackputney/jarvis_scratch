@@ -45,6 +45,11 @@ def _chosen_provider(cfg: Config, provider: str | None) -> str:
     return effective_tts_provider(cfg, provider)
 
 
+def _is_quota_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return "quota_exceeded" in msg or "quota exceeded" in msg or "credits remaining" in msg
+
+
 def stop_speech() -> None:
     elevenlabs.stop()
 
@@ -72,6 +77,10 @@ def _speak_with_cfg(
     t0 = time.monotonic()
 
     if chosen == "pyttsx3":
+        logger.error(
+            "🔊 Using local Windows TTS (pyttsx3) — cloud voices unavailable. "
+            "Check ElevenLabs/Cartesia credits or API keys."
+        )
         logger.debug("🔊 TTS provider: pyttsx3 (local)")
         cartesia._speak_local(text)
         _record_tts("pyttsx3", int((time.monotonic() - t0) * 1000))
@@ -108,10 +117,16 @@ def _speak_with_cfg(
             return
         except TTSError as exc:
             last_exc = exc
+            if _is_quota_error(exc):
+                logger.error(
+                    "ElevenLabs quota exceeded — no credits left. "
+                    "Upgrade at elevenlabs.io or switch tts_provider in config.json."
+                )
+                break
             logger.warning("ElevenLabs attempt %d failed: %s", attempt + 1, exc)
             time.sleep(0.4 * (attempt + 1))
     logger.warning(
-        "ElevenLabs unavailable after retries (%s) — falling back to Cartesia",
+        "ElevenLabs unavailable (%s) — falling back to Cartesia",
         last_exc,
     )
     fb_t0 = time.monotonic()
@@ -203,13 +218,19 @@ def speak_stream(
             return
         except TTSError as exc:
             last_exc = exc
+            if _is_quota_error(exc):
+                logger.error(
+                    "ElevenLabs quota exceeded — no credits left. "
+                    "Upgrade at elevenlabs.io or switch tts_provider in config.json."
+                )
+                break
             logger.warning("ElevenLabs stream attempt %d failed: %s", attempt + 1, exc)
             time.sleep(0.4 * (attempt + 1))
 
     if not buffer:
         return
     logger.warning(
-        "ElevenLabs stream unavailable after retries (%s) — falling back to Cartesia",
+        "ElevenLabs stream unavailable (%s) — falling back to Cartesia",
         last_exc,
     )
     cartesia.speak_cartesia_stream(

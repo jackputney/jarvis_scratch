@@ -9,6 +9,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from tests.conftest import darwin_only
+
 
 @pytest.fixture
 def client(temp_env):
@@ -44,6 +46,7 @@ def test_enable_login_item_non_macos():
         assert "macOS only" in enable_login_item()
 
 
+@darwin_only
 def test_build_launch_agent_plist_dev_mode(tmp_path, monkeypatch):
     root = tmp_path / "project"
     root.mkdir()
@@ -69,6 +72,7 @@ def test_build_launch_agent_plist_dev_mode(tmp_path, monkeypatch):
     assert ".venv/bin" in plist["EnvironmentVariables"]["PATH"]
 
 
+@darwin_only
 def test_build_launch_agent_plist_frozen_mode(tmp_path, monkeypatch):
     exe = tmp_path / "Jarvis.app" / "Contents" / "MacOS" / "Jarvis"
     exe.parent.mkdir(parents=True)
@@ -105,6 +109,7 @@ def test_write_launch_agent_plist(tmp_path, monkeypatch):
     assert data["Label"] == "com.jarvis.app"
 
 
+@darwin_only
 def test_enable_login_item_calls_launchctl(tmp_path, monkeypatch):
     plist_path = tmp_path / "com.jarvis.app.plist"
     plist_path.write_bytes(plistlib.dumps({"Label": "com.jarvis.app"}))
@@ -122,6 +127,7 @@ def test_enable_login_item_calls_launchctl(tmp_path, monkeypatch):
     assert "enabled" in result.lower()
 
 
+@darwin_only
 def test_disable_login_item_removes_plist(tmp_path, monkeypatch):
     plist_path = tmp_path / "com.jarvis.app.plist"
     plist_path.write_bytes(plistlib.dumps({"Label": "com.jarvis.app"}))

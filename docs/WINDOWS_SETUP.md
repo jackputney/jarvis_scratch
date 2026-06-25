@@ -11,12 +11,15 @@ they need MSVC Build Tools and otherwise fail to install:
 | Package | On 3.11/3.12 | On 3.14 |
 |---------|--------------|---------|
 | `pyaudio` | wheel installs | build fails → falls back to sounddevice |
-| `webrtcvad` | wheel installs | build fails → **RMS-energy VAD only** |
+| `webrtcvad` | wheel installs (or MSVC build) | build fails → **RMS-energy VAD only** |
 | `pynput` (hotkey) | installs | may fail → global hotkey disabled |
 
 `webrtcvad` matters most: without it, voice activity detection falls back to a
 crude RMS-energy check that's far more likely to mis-fire (e.g. the barge-in
-self-trigger). Getting `webrtcvad` installed materially improves smoothness.
+self-trigger). On Windows there is often **no prebuilt wheel** — you need
+[Microsoft C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
+to compile it, or skip it and rely on the tuned energy-VAD thresholds in
+`config.json` (`barge_in_min_ms`, etc.).
 
 ```powershell
 # from the repo root
@@ -42,9 +45,13 @@ Copy `.env.example` → `.env` and set at least `ANTHROPIC_API_KEY`. Optional:
   adapter auto-falls back to `faster-whisper`. Pin `"stt_backend": "faster"` in
   `config.json` to skip the fallback log. `stt_model` `small`/`small.en` is more
   accurate but slower than `base.en`.
-- **Apps & media** — `open_app` works (PowerShell `Start-Process`). Music/Photos/
-  Podcasts *control* is macOS-only; on Windows Jarvis can open Spotify but not
-  control playback yet (see `docs/PLATFORM.md` → `AppControl` adapter).
+- **Apps & media** — `open_app` resolves Start-menu apps via filtered
+  `Get-StartApps` (cached per app) and launches with
+  `cmd /c start shell:AppsFolder\{AppID}` — reliable for Spotify, Discord,
+  Chrome, Edge, etc. First lookup for an uncommon app can take 1–2s.
+  Music/Photos/Podcasts *control* is macOS-only; on Windows Jarvis can open
+  Spotify but not control playback yet (see `docs/PLATFORM.md` → `AppControl`
+  adapter).
 - **Diary memory** — pre-fix refusals saved to `memory/diary/` are now filtered
   from recall (`memory/semantic.py`), but old entries still exist on disk; trim +
   reindex from the dashboard if behaviour regresses.

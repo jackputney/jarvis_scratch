@@ -1,7 +1,7 @@
 # Architecture
 
 <!-- AGENTS: Only update this when you make confirmed structural changes -->
-<!-- Last updated: 2026-06-22 | Updated by: Claude acting for Jack -->
+<!-- Last updated: 2026-06-24 | Updated by: Cursor acting for Oliver -->
 
 ## Stack
 
@@ -12,13 +12,13 @@
 | STT (Win) | faster-whisper | ≥1.0.0 | Oliver's primary |
 | AI primary | Claude (Anthropic) | anthropic 0.107.1 | haiku → sonnet routing |
 | AI fallback | OpenAI, Gemini | optional | `llm/` router |
-| TTS primary | ElevenLabs | elevenlabs ≥1.0.0 | pcm_16000 streaming |
-| TTS fallback | Cartesia | 3.2.0 | pcm_16000 |
+| TTS primary | ElevenLabs | elevenlabs ≥1.0.0 | pcm_22050 streaming (free tier) |
+| TTS fallback | Cartesia | 3.2.0 | pcm streaming |
 | TTS last resort | pyttsx3 | 2.99 | local, no key needed |
 | Orchestrator | Custom FIFO | — | depth 3, stale-drop 60 s |
 | Dashboard | Flask + SSE | Flask 3.1.3 | localhost:7777 |
 | Memory | SQLite WAL | — | `memory/db.py` only |
-| Orb UI | PyQt6 | 6.11.0 | Mac only |
+| Orb UI | PyQt6 | 6.11.0 | Cross-platform (Mac-tuned) |
 | Audio | sounddevice | ≥0.4.6 | primary, cross-platform |
 | App bundle | PyInstaller | — | Mac: .app, Win: .exe |
 
@@ -28,7 +28,7 @@
 Mic (sounddevice)
   → openwakeword (wake detection)
       ↓ wake word detected
-  → faster-whisper / mlx-whisper (STT)
+  → adapters/stt.py (mlx-whisper / faster-whisper)
       ↓ transcript + confidence
   → TurnTrace.stash_stt_metrics()
       ↓
@@ -37,7 +37,7 @@ Mic (sounddevice)
   → Claude (streaming, haiku or sonnet)
       ↓ sentence chunks
   → tts/router.py
-      → ElevenLabs (primary, pcm_16000 streaming)
+      → ElevenLabs (primary, pcm_22050 streaming)
       → Cartesia (fallback on TTSError)
       → pyttsx3 (last resort)
       ↓
@@ -55,7 +55,7 @@ IDLE → LISTENING → THINKING → SPEAKING → FOLLOWUP → IDLE
 
 Key components:
 
-- `speech_state.py` — BargeInGate (threshold 0.48 / 2 hits)
+- `speech_state.py` — BargeInGate (1.5s grace, 450ms sustained speech, ~480 RMS floor)
 - `events.py` — EventBus, ALL state changes via `set_pipeline_state()`
 - `ui/face.py` — orb connects via `connect_pipeline_state()`, 50 ms debounce
 - `runtime.py` — orchestrator ↔ pipeline interrupt hooks
@@ -139,13 +139,13 @@ DB tables: `sessions`, `turns`, `events`, `corrections`, `lessons`, `suggestions
 
 | Feature | Mac | Windows |
 |---------|-----|---------|
-| STT | mlx-whisper | faster-whisper |
-| Orb UI | PyQt6 ✅ | ❌ not built |
+| STT | mlx-whisper (`adapters/stt.py`) | faster-whisper (`adapters/stt.py`) |
+| Orb UI | PyQt6 ✅ | PyQt6 ✅ (Mac-tuned) |
 | App bundle | .app (PyInstaller) | .exe (`build_windows.bat`) |
 | Music | AppleScript + Music.app | Spotify URI |
 | Device control | AppleScript | PowerShell (Oliver) |
 | Dashboard window | PyWebView child process | Edge/Chrome --app mode |
-| Launch at login | LaunchAgent plist | Registry entry |
+| Launch at login | LaunchAgent plist | Not implemented (`login_item.py` macOS-only) |
 | User data | ~/Library/Application Support/Jarvis/ | %APPDATA%/Jarvis/ |
 
 ## Coordinated files (message other dev before editing)

@@ -27,6 +27,33 @@
 
 ---
 
+### 2026-06-24 — Windows test parity + docs refresh to v0.5.0 — Oliver
+
+[Agent: Cursor — acting for Oliver — 2026-06-24]
+
+**Branch:** oliver/sprint-6 | **Tests:** 429 passing on Windows (6 darwin skips)
+
+**What changed:**
+
+- `DOCS/PROJECT_STATE.md` — updated to v0.5.0, merged state, next actions
+- `DOCS/ARCHITECTURE.md` — pcm_22050, STT adapter, barge-in thresholds, Windows orb/launch gaps
+- `.cursorrules` — ACTIVE STATE section refreshed
+- `tests/conftest.py` — shared `darwin_only` skip marker
+- `tests/test_login_item.py` — skip LaunchAgent tests on non-macOS
+- `tests/test_media.py` — patch Darwin for Spotlight find_file tests
+- `tests/test_paths.py` — frozen-path test uses APPDATA on Windows
+- `tools/pitch_deck.py` — validate topic before pptx import
+- `run.ps1` — prefer py -3.12/3.11 for new venvs; warn on 3.14+
+- `docs/WINDOWS_SETUP.md` — accurate open_app launch description
+- `tts/router.py` — fast-fail on quota_exceeded; clear log when falling to local TTS
+- `main.py` — UTF-8 stdout/stderr on Windows for banner emoji
+
+**Why:** Docs were stale post-v0.5.0 merge; Windows pytest showed 9 false failures from macOS-only assumptions.
+
+**Watch out for:** Recreate `.venv` on Python 3.12 for webrtcvad (`Remove-Item -Recurse .venv; .\run.ps1`).
+
+---
+
 ### 2026-06-23 — confirm gate KeyError fix + Oliver sprint-5 review — Jack
 
 [Agent: Cursor — acting for Jack — 2026-06-23]
