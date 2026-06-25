@@ -12,6 +12,7 @@ class hierarchy — just explicit, readable mappings.
 from __future__ import annotations
 
 from memory.knowledge import read_note, write_note
+from tools.download import download_file
 from tools.device_control import (
     get_battery_status,
     get_system_info,

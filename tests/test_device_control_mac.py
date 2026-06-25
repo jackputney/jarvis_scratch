@@ -55,3 +55,60 @@ def test_set_appearance_mode_dark(monkeypatch):
 def test_set_wifi_invalid_action(monkeypatch):
     monkeypatch.setattr(dc.platform, "system", lambda: "Darwin")
     assert "Refused" in set_wifi("toggle")
+
+
+def test_set_wifi_detects_interface_dynamically(monkeypatch):
+    """Regression: set_wifi previously hardcoded en0; now detects via networksetup."""
+    monkeypatch.setattr(dc.platform, "system", lambda: "Darwin")
+
+    calls: list = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        if "-listallhardwareports" in cmd:
+            return CompletedProcess(cmd, 0, stdout="Hardware Port: Wi-Fi\nDevice: en1\n", stderr="")
+        # the actual setairportpower call
+        return CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(dc.subprocess, "run", fake_run)
+    result = set_wifi("off")
+    assert "WiFi turned off" in result
+    setairport_call = [c for c in calls if "-setairportpower" in c][0]
+    assert "en1" in setairport_call  # used detected interface, not hardcoded en0
+
+
+def test_set_brightness_windows_path(monkeypatch):
+    monkeypatch.setattr(dc.platform, "system", lambda: "Windows")
+
+    def fake_run(cmd, **kwargs):
+        return CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(dc.subprocess, "run", fake_run)
+    result = dc.set_brightness(75)
+    assert "75%" in result
+
+
+def test_set_brightness_macos_osascript_path(monkeypatch):
+    """macOS brightness now has a branch (previously Windows-only)."""
+    monkeypatch.setattr(dc.platform, "system", lambda: "Darwin")
+
+    def fake_run(cmd, **kwargs):
+        return CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(dc.subprocess, "run", fake_run)
+    result = dc.set_brightness(50)
+    assert "50%" in result
+
+
+def test_set_brightness_macos_osascript_failure_fallback(monkeypatch):
+    """Falls back to brightness CLI if osascript fails, returns helpful message if both fail."""
+    monkeypatch.setattr(dc.platform, "system", lambda: "Darwin")
+    calls: list = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return CompletedProcess(cmd, 1, stdout="", stderr="not supported")
+
+    monkeypatch.setattr(dc.subprocess, "run", fake_run)
+    result = dc.set_brightness(50)
+    assert "Couldn't set brightness" in result or "brew install brightness" in result

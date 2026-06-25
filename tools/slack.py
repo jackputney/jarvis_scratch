@@ -17,13 +17,16 @@ def send_slack_message(channel: str, text: str) -> str:
         import requests
     except ImportError as exc:
         return f"Slack error: {exc}"
-    resp = requests.post(
-        "https://slack.com/api/chat.postMessage",
-        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-        json={"channel": channel, "text": text or ""},
-        timeout=10,
-    )
-    data = resp.json()
+    try:
+        resp = requests.post(
+            "https://slack.com/api/chat.postMessage",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json={"channel": channel, "text": text or ""},
+            timeout=10,
+        )
+        data = resp.json()
+    except Exception as exc:  # noqa: BLE001
+        return f"Slack error: {exc}"
     if not data.get("ok"):
         return f"Slack error: {data.get('error', 'unknown')}"
     return f"Message sent to {channel}"
@@ -37,13 +40,16 @@ def read_slack_channel(channel: str, count: int = 10) -> str:
         import requests
     except ImportError as exc:
         return f"Slack error: {exc}"
-    resp = requests.get(
-        "https://slack.com/api/conversations.history",
-        headers={"Authorization": f"Bearer {token}"},
-        params={"channel": channel, "limit": max(1, min(int(count), 50))},
-        timeout=10,
-    )
-    data = resp.json()
+    try:
+        resp = requests.get(
+            "https://slack.com/api/conversations.history",
+            headers={"Authorization": f"Bearer {token}"},
+            params={"channel": channel, "limit": max(1, min(int(count), 50))},
+            timeout=10,
+        )
+        data = resp.json()
+    except Exception as exc:  # noqa: BLE001
+        return f"Slack error: {exc}"
     if not data.get("ok"):
         return f"Slack error: {data.get('error', 'unknown')}"
     lines = [f"[{m.get('user', 'unknown')}]: {m.get('text', '')}" for m in data.get("messages", [])]

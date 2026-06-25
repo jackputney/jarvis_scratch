@@ -27,6 +27,27 @@
 
 ---
 
+### 2026-06-25 — full tools audit and debug pass — Jack
+
+[Agent: Cursor — acting for Jack — 2026-06-25]
+
+**Branch:** jack/sprint-8 | **Tests:** 517 passing
+
+**What changed:**
+- `tools/registry.py` — added missing `from tools.download import download_file`; every voice "download" command was returning a NameError (confirmed by runtime debug log).
+- `tools/google_gmail.py` — added `logging`/`logger`; `fetch_thread_context` now logs at WARNING on failure instead of silently returning `""`.
+- `tools/slack.py` — wrapped both HTTP calls in `try/except`; network errors now return a clear string instead of propagating.
+- `tools/device_control.py` — `set_brightness` now has a macOS branch (osascript + Homebrew `brightness` CLI fallback); `set_wifi` detects the active Wi-Fi interface dynamically instead of hardcoding `en0`.
+- `tests/test_download.py` — added `test_download_dispatch_is_importable` regression test for the missing import.
+- `tests/test_device_control_mac.py` — added `test_set_wifi_detects_interface_dynamically`, `test_set_brightness_windows_path`, `test_set_brightness_macos_osascript_path`, `test_set_brightness_macos_osascript_failure_fallback`.
+- `DOCS/TOOLS_AUDIT.md` — full 72-tool inventory, issues found/fixed, flagged follow-ups.
+
+**Why:** Full audit revealed one HIGH (broken download tool), two MEDIUMs (silent exceptions), and two LOWs (missing platform branch, hardcoded interface). All fixed.
+
+**Watch out for:** `set_brightness` on macOS tries osascript — if the user hasn't granted Accessibility access it may fail gracefully and suggest `brew install brightness`. Four issues flagged for follow-up in `DOCS/TOOLS_AUDIT.md` but not fixed this sprint.
+
+---
+
 ### 2026-06-25 — native Dev Log append/read via Google Docs API — Jack
 
 [Agent: Cursor — acting for Jack — 2026-06-25]

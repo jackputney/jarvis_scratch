@@ -7,7 +7,7 @@
 
 | Item | Value |
 |------|-------|
-| Tests | 497+ passing on Windows (7 darwin skips); 457 on macOS |
+| Tests | 517+ passing (combined); 7 darwin skips on Windows |
 | Main tag | v0.5.0 (eced13b); sprint-6 work merged on top |
 | Jack branch | `jack/sprint-7` — dev log tools, PR #6 open |
 | Oliver branch | `oliver/sprint-6` (merged into main) |

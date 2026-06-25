@@ -85,3 +85,16 @@ def test_download_failure_returns_message(tmp_path, monkeypatch):
 def test_download_is_confirm_required():
     assert "download_file" in CONFIRM_REQUIRED_TOOLS
     assert "download_file" not in READ_ONLY_TOOLS
+
+
+def test_download_dispatch_is_importable():
+    """Regression: registry.py previously omitted the download_file import,
+    causing dispatch_tool('download_file', ...) to raise NameError."""
+    from tools.registry import dispatch_tool
+
+    # Patch inside the registry module's namespace where the lambda closes over it
+    with patch("tools.registry.download_file", return_value="Downloaded.") as mock_dl:
+        result = dispatch_tool("download_file", {"url": "https://example.com/x.txt"})
+    # Should call through without NameError
+    mock_dl.assert_called_once()
+    assert result == "Downloaded."
