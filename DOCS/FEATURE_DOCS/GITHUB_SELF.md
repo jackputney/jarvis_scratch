@@ -1,22 +1,22 @@
-# GitHub Self-Read
+# GitHub Self (Read + Write)
 
-Jarvis can read its own source repository (`jackputney/jarvis_scratch`) via the GitHub REST API. All tools are **read-only** — no push, PR, or write operations.
+Jarvis can read and write its own source repository (`jackputney/jarvis_scratch`) via the GitHub REST API.
 
 ## What it does
 
-- Lets Claude and `reflect.py` fetch **current code from GitHub main**, not stale local guesses
-- Powers five voice/dashboard tools registered as `READ_ONLY`
-- Used by Jarvis Thinks when a tool's error rate exceeds 20%: reads `tools/<name>.py`, passes numbered source to haiku, and embeds a code snippet in `proposed_change`
+- **Read:** fetch live code from GitHub main for reflection and voice queries
+- **Write:** create branches, files, pull requests, and issues (with confirm gates on high-risk ops)
+- **Jarvis Thinks:** accepting a suggestion opens a GitHub issue + tracking branch automatically
 
 ## Files
 
 | File | Role |
 |------|------|
-| `tools/github_self.py` | API client + five tool functions |
-| `tools/registry.py` | Tool registration |
+| `tools/github_self.py` | GitHub API client (read + write tools) |
+| `tools/registry.py` | Tool registration and risk tiers |
 | `hub/integrations.json` | Hub entry `github_self` |
-| `improvement/reflect.py` | Reads tool source before high-severity suggestions |
-| `config.py` / `config.json` | `github_repo`, `github_branch` (not the PAT) |
+| `improvement/reflect.py` | Accept flow → branch + issue |
+| `memory/db.py` | `suggestions.github_issue_url` column |
 
 ## Configuration
 
@@ -37,77 +37,66 @@ GITHUB_PAT=ghp_your_token_here
 
 ## PAT setup
 
-1. GitHub → Settings → Developer settings → Personal access tokens
-2. Fine-grained token recommended: **Contents: Read-only** on `jackputney/jarvis_scratch`
-3. Classic token alternative: scope `repo` (read) or public-repo read if the repo is public
-4. Add `GITHUB_PAT` to `.env` or Hub → GitHub Self-Read
+Fine-grained token on `jackputney/jarvis_scratch`:
 
-## Tools
+| Scope | Needed for |
+|-------|------------|
+| Contents | Read + write files |
+| Issues | Create issues and comments |
+| Pull requests | Open PRs |
+| Metadata | Read (always) |
 
-### `read_own_file(path)`
+Classic token alternative: scope `repo` (full control of private repos).
 
-```python
-read_own_file("tools/web.py")
-# → file contents as string (max 50KB, truncated with notice if larger)
-```
+## Read tools (READ_ONLY)
 
-### `list_own_files(directory="")`
+| Tool | Description |
+|------|-------------|
+| `read_own_file(path)` | File contents (50KB cap) |
+| `list_own_files(directory)` | Paths in a directory |
+| `search_own_code(query)` | Code search, top 5 |
+| `get_own_commits(limit)` | Recent commits |
+| `get_own_issues(state)` | Issue list |
 
-```python
-list_own_files("tools")
-# → newline-separated paths under tools/
-```
+## Write tools
 
-### `search_own_code(query)`
+| Tool | Risk tier | Description |
+|------|-----------|-------------|
+| `create_own_branch(name, from_branch="main")` | MODERATE | Create branch from ref |
+| `create_own_issue(title, body, labels=[])` | MODERATE | Open an issue |
+| `comment_own_issue(number, body)` | MODERATE | Comment on issue |
+| `create_own_file(path, content, message, branch="main")` | **HIGH_RISK** | Create/update file (confirm required) |
+| `create_own_pr(title, body, head, base="main")` | **HIGH_RISK** | Open pull request (confirm required) |
 
-```python
-search_own_code("def web_search")
-# → top 5 matches with path, snippet, URL
-```
+### Voice examples
 
-### `get_own_commits(limit=10)`
+- "Create a branch called `feature/voice-fix`" → `create_own_branch`
+- "Open an issue about the TTS fallback" → `create_own_issue`
+- "What are the open issues?" → `get_own_issues`
+- "Open a PR from `feature/x` to main" → `create_own_pr`
 
-```python
-get_own_commits(5)
-# → recent commits on github_branch
-```
+## Jarvis Thinks accept flow
 
-### `get_own_issues(state="open")`
+When you click **Accept** on a suggestion:
 
-```python
-get_own_issues("open")
-# → issue list (pull requests excluded)
-```
-
-## reflect.py integration
-
-When a tool in `top_tools` has error rate **> 10%** (metric threshold) and **> 20%** (high severity):
-
-1. `resolve_tool_source_path(tool_name)` tries `tools/<name>.py` then code search
-2. `_haiku_tool_suggestion()` sends numbered source + telemetry to haiku
-3. `proposed_change` includes a fenced snippet of the current GitHub file
-
-If `GITHUB_PAT` is missing, reflection continues with generic advice (no crash).
+1. Status → `accepted`
+2. Branch `jarvis/improvement/{suggestion_id}` created on GitHub
+3. If `proposed_change` references a file, current GitHub contents are attached
+4. Issue opened: `[Jarvis Suggests] {title}` with body, proposed change, and evidence
+5. Issue URL stored in `suggestions.github_issue_url`
 
 ## Gotchas
 
 | Topic | Detail |
 |-------|--------|
-| Rate limits | Unauthenticated search is very limited; PAT required. 403/429 returns a clear message |
-| 50KB cap | Large files are truncated; notice appended |
-| Branch | Reads `github_branch` from config (default `main`), not local uncommitted edits |
-| PAT expiry | Expired tokens return 401/403 — rotate in Hub |
-| Secrets | `GITHUB_PAT` is never logged or stored in config.json |
+| Confirm gates | `create_own_file` and `create_own_pr` require dashboard/voice confirm |
+| Rate limits | 403/429 returns a clear message; PAT required |
+| Branch vs local | GitHub reads/writes remote `main`, not uncommitted local edits |
+| PAT expiry | Rotate in Hub when write calls start failing |
+| Secrets | `GITHUB_PAT` is never logged |
 
 ## How to test
 
 ```bash
 pytest tests/test_github_self.py -v
-```
-
-With a real PAT:
-
-```bash
-export GITHUB_PAT=ghp_...
-python -c "from tools.github_self import read_own_file; print(read_own_file('README.md')[:200])"
 ```

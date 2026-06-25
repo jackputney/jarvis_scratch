@@ -7,11 +7,11 @@
 
 | Item | Value |
 |------|-------|
-| Tests | 423 passing (Mac); ~420 passing on Windows after darwin skips |
-| Main tag | **v0.5.0** |
-| Branch | `main` at `eced13b` |
-| Oliver branch | `oliver/sprint-6` (tracking main, no new commits yet) |
-| Jack branch | `jack/self-improve` (merged into v0.5.0) |
+| Tests | 497+ passing on Windows (7 darwin skips) |
+| Main tag | v0.5.0 (eced13b); sprint-6 work merged on top |
+| Branch | `main` — all work consolidated |
+| Jack branch | `jack/sprint-6` (merged into main) |
+| Oliver branch | `oliver/sprint-6` (merged into main) |
 
 ## What's on main (v0.5.0)
 
@@ -32,9 +32,9 @@
 
 | Issue | Severity | Status |
 |-------|----------|--------|
-| Self-improvement Stage 2–4 not started | Medium | Stage 2 (golden set + judge) is next |
-| Windows venv on Python 3.14 | Medium | Recreate with 3.12; `webrtcvad` missing → energy VAD only |
-| Adapter layer only has STT + AudioIO | Medium | AppControl, LaunchAtLogin still inline |
+| Self-improvement Stage 2–4 not started | Medium | Stage 2 (golden set + judge) built; wiring next |
+| webrtcvad missing on Windows | Low | No MSVC Build Tools; energy VAD fallback works |
+| Ctrl+C shutdown hang | Low | Fixed (jack/sprint-6 merged) |
 | Home Assistant tools not implemented | Low | Hub UI exists, no tools |
 | Music playback control Windows gap | Low | open_app works; play/pause macOS-only |
 | Abort trap on Ctrl+C | Low | Cosmetic — PyQt6 shutdown quirk |

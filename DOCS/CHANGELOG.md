@@ -27,6 +27,24 @@
 
 ---
 
+### 2026-06-25 — terminal shutdown and empty-follow-up loop fix — Jack
+
+[Agent: Cursor — acting for Jack — 2026-06-25]
+
+**Branch:** jack/sprint-6 | **Tests:** 440 passing
+
+**What changed:**
+- `main.py` — Ctrl+C/SIGTERM now requests pipeline interrupt, runs graceful shutdown, quits Qt, and exits explicitly; headless mode uses the same shutdown path.
+- `pipeline.py` — follow-up empty-capture tolerance is capped at 3 misses and returns to `IDLE` when exhausted; barge-in follow-up now breaks instead of looping forever on empty STT.
+- `tests/test_main_shutdown.py` — covers the UI shutdown helper.
+- `tests/test_voice_pipeline.py` — covers the 3-miss follow-up limit and `IDLE` return.
+
+**Why:** Ctrl+C could leave Jarvis stuck in a repeated "Nothing intelligible heard" listen loop, requiring terminal closure.
+
+**Watch out for:** This touches coordinated files `main.py` and `pipeline.py`; Oliver should rebase `oliver/sprint-6` before merging AudioIO changes.
+
+---
+
 ### 2026-06-24 — Windows test parity + docs refresh to v0.5.0 — Oliver
 
 [Agent: Cursor — acting for Oliver — 2026-06-24]
@@ -51,6 +69,30 @@
 **Why:** Docs were stale post-v0.5.0 merge; Windows pytest showed 9 false failures from macOS-only assumptions.
 
 **Watch out for:** Recreate `.venv` on Python 3.12 for webrtcvad (`Remove-Item -Recurse .venv; .\run.ps1`).
+
+---
+
+### 2026-06-23 — GitHub write access — Jack
+
+[Agent: Cursor — acting for Jack — 2026-06-23]
+
+**Branch:** jack/sprint-6 | **Tests:** 439 passing
+
+**What changed:**
+
+- `tools/github_self.py` — five write tools: branch, file, PR, issue, comment
+- `tools/registry.py` — MODERATE/HIGH_RISK tiers; `DASHBOARD_CONFIRM_TOOLS` unchanged pattern
+- `improvement/reflect.py` — Accept opens branch + GitHub issue; stores `github_issue_url`
+- `memory/db.py` — `suggestions.github_issue_url` column
+- `improvement/trace.py` — `suggestion_github` write op
+- `dashboard/app.py` — accept endpoint returns issue URL
+- `tests/test_github_self.py` — write tool mocks + accept integration
+- `DOCS/FEATURE_DOCS/GITHUB_SELF.md` — read + write documentation
+- `costs.py` — daily tool/query counts use local midnight (fixes UTC `date('now') mismatch in tests)
+
+**Why:** Jarvis Thinks suggestions need a concrete handoff to GitHub so Jack/Oliver can pick them up in Cursor and close the loop.
+
+**Watch out for:** Write tools need PAT scopes beyond read-only. `create_own_file`/`create_own_pr` always require confirm. Dev Log Google Doc updated manually (no API access from repo).
 
 ---
 

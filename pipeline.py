@@ -111,7 +111,12 @@ STATIC_SYSTEM_INSTRUCTIONS = (
     "chit-chat, and single tool actions yourself without escalating.\n\n"
     "## Time and date\n"
     "For time or date questions, always call get_current_time — never guess or use "
-    "training data for the current time."
+    "training data for the current time.\n\n"
+    "## GitHub\n"
+    "You have read/write access to exactly one GitHub repo: jackputney/jarvis_scratch. "
+    "When the user asks about issues, commits, branches, or anything GitHub-related, "
+    "call get_own_issues, get_own_commits, create_own_branch, etc. immediately — "
+    "never ask which repo."
 )
 
 WARN_80_MESSAGE = "Heads up, I'm at 80 percent of today's budget."
@@ -257,7 +262,7 @@ _END_PHRASES = (
     "that'll be all",
 )
 
-MAX_FOLLOWUP_MISSES = 4
+MAX_FOLLOWUP_MISSES = 3
 
 
 def _is_end_phrase(text: str) -> bool:
@@ -325,6 +330,7 @@ def _await_followup_utterance(
                 return None
             return text
         misses += 1
+    set_state("IDLE")
     return None
 
 
@@ -794,6 +800,11 @@ def _call_claude(
                     error=tool_error,
                 )
                 active.add_tool_ms(tool_ms)
+            try:
+                from orchestrator.runtime import get_bus
+                get_bus().emit("tool.run", name=tu["name"], ok=not bool(tool_error), source="voice")
+            except Exception:  # noqa: BLE001
+                pass
             if needs_confirm and not _interrupt.is_set():
                 _emit_pipeline_state("THINKING", on_state)
             logger.info("   → %s", result[:120])
@@ -1124,6 +1135,8 @@ def run_pipeline(
                                 capture_queue, capturing, paused, cfg, set_state, wake_event,
                                 last_reply=job.reply if job else None,
                             )
+                        if text is None:
+                            break
                         continue
 
                     if _interrupt.is_set():

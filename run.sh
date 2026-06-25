@@ -47,4 +47,4 @@ if [[ ! -f .env ]]; then
 fi
 
 echo "✅ Environment ready — launching."
-python main.py "$@"
+exec python main.py "$@"

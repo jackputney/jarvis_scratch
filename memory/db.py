@@ -130,7 +130,8 @@ def init_db() -> None:
                     severity TEXT,
                     status TEXT DEFAULT 'pending',
                     evidence_json TEXT,
-                    proposed_change TEXT
+                    proposed_change TEXT,
+                    github_issue_url TEXT
                 );
                 CREATE TABLE IF NOT EXISTS baselines (
                     id TEXT PRIMARY KEY,
@@ -147,6 +148,11 @@ def init_db() -> None:
                 """
             )
             conn.commit()
+            try:
+                conn.execute("ALTER TABLE suggestions ADD COLUMN github_issue_url TEXT")
+                conn.commit()
+            except Exception:  # noqa: BLE001
+                pass
         _initialised = True
 
 

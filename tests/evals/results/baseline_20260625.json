@@ -1,0 +1,171 @@
+{
+  "date": "2026-06-25",
+  "total": 12,
+  "passed": 3,
+  "failed": 9,
+  "pass_rate": 0.25,
+  "results": [
+    {
+      "case_id": "time_simple",
+      "input": "what time is it",
+      "tags": [
+        "tools",
+        "basic"
+      ],
+      "response": "(dry-run \u2014 no API call)",
+      "tools_called": [],
+      "error": null,
+      "pass": false,
+      "score": 0.5,
+      "reason": "expected tool 'get_current_time', got []"
+    },
+    {
+      "case_id": "email_send_confirm",
+      "input": "send jack an email saying I'll be late",
+      "tags": [
+        "email",
+        "confirm"
+      ],
+      "response": "(dry-run \u2014 no API call)",
+      "tools_called": [],
+      "error": null,
+      "pass": false,
+      "score": 0.5,
+      "reason": "expected tool 'send_email', got []"
+    },
+    {
+      "case_id": "no_hallucinate_contact",
+      "input": "what's sarah's number",
+      "tags": [
+        "contacts"
+      ],
+      "response": "(dry-run \u2014 no API call)",
+      "tools_called": [],
+      "error": null,
+      "pass": true,
+      "score": 1.0,
+      "reason": "all checks passed"
+    },
+    {
+      "case_id": "barge_in_short",
+      "input": "tell me a long story",
+      "tags": [
+        "length"
+      ],
+      "response": "(dry-run \u2014 no API call)",
+      "tools_called": [],
+      "error": null,
+      "pass": true,
+      "score": 1.0,
+      "reason": "all checks passed"
+    },
+    {
+      "case_id": "weather_query",
+      "input": "will it rain today in London",
+      "tags": [
+        "tools",
+        "weather"
+      ],
+      "response": "(dry-run \u2014 no API call)",
+      "tools_called": [],
+      "error": null,
+      "pass": false,
+      "score": 0.0,
+      "reason": "expected tool 'get_weather', got []"
+    },
+    {
+      "case_id": "greeting_brief",
+      "input": "hey how are you",
+      "tags": [
+        "chit-chat"
+      ],
+      "response": "(dry-run \u2014 no API call)",
+      "tools_called": [],
+      "error": null,
+      "pass": true,
+      "score": 1.0,
+      "reason": "all checks passed"
+    },
+    {
+      "case_id": "remember_fact",
+      "input": "remember that my dog is called Max",
+      "tags": [
+        "memory"
+      ],
+      "response": "(dry-run \u2014 no API call)",
+      "tools_called": [],
+      "error": null,
+      "pass": false,
+      "score": 0.0,
+      "reason": "expected tool 'remember', got []"
+    },
+    {
+      "case_id": "open_app",
+      "input": "open Spotify",
+      "tags": [
+        "tools",
+        "system"
+      ],
+      "response": "(dry-run \u2014 no API call)",
+      "tools_called": [],
+      "error": null,
+      "pass": false,
+      "score": 0.0,
+      "reason": "expected tool 'open_app', got []"
+    },
+    {
+      "case_id": "no_fake_time",
+      "input": "what day is it today",
+      "tags": [
+        "tools",
+        "basic"
+      ],
+      "response": "(dry-run \u2014 no API call)",
+      "tools_called": [],
+      "error": null,
+      "pass": false,
+      "score": 0.5,
+      "reason": "expected tool 'get_current_time', got []"
+    },
+    {
+      "case_id": "search_memory",
+      "input": "what did I tell you about taxes",
+      "tags": [
+        "memory"
+      ],
+      "response": "(dry-run \u2014 no API call)",
+      "tools_called": [],
+      "error": null,
+      "pass": false,
+      "score": 0.0,
+      "reason": "expected tool 'search_memory', got []"
+    },
+    {
+      "case_id": "escalate_coding",
+      "input": "write a detailed Python migration plan for our SQLite schema",
+      "tags": [
+        "routing"
+      ],
+      "response": "(dry-run \u2014 no API call)",
+      "tools_called": [],
+      "error": null,
+      "pass": false,
+      "score": 0.0,
+      "reason": "expected tool 'escalate', got []"
+    },
+    {
+      "case_id": "confirm_gate_aware",
+      "input": "append a row to my budget sheet with rent 1200",
+      "tags": [
+        "sheets",
+        "confirm"
+      ],
+      "response": "(dry-run \u2014 no API call)",
+      "tools_called": [],
+      "error": null,
+      "pass": false,
+      "score": 0.5,
+      "reason": "expected tool 'append_row', got []"
+    }
+  ]
+}

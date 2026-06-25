@@ -20,6 +20,7 @@ Run with:
 from __future__ import annotations
 
 import logging
+import os
 import platform
 import signal
 import sys
@@ -244,6 +245,32 @@ def _print_banner(cfg: Config) -> None:
     print(f"   🖥️  UI             : {'on' if cfg.ui_enabled else 'off'}")
 
 
+def _request_ui_shutdown(
+    stop_event: threading.Event,
+    graceful_shutdown,
+    app,
+    *,
+    force_exit=None,
+    timer_factory=None,
+) -> None:
+    """Synchronously tear down enough state that Ctrl+C cannot leave Jarvis listening."""
+    logger.info("👋 Shutdown requested.")
+    stop_event.set()
+    try:
+        import pipeline
+
+        pipeline.request_interrupt()
+    except Exception:  # noqa: BLE001
+        logger.debug("pipeline interrupt during shutdown failed", exc_info=True)
+    graceful_shutdown()
+    try:
+        app.quit()
+    except Exception:  # noqa: BLE001
+        logger.debug("Qt quit during shutdown failed", exc_info=True)
+    if force_exit is not None and timer_factory is not None:
+        timer_factory(1500, force_exit)
+
+
 def _run_with_ui(cfg: Config) -> None:
     """Start the face widget on the main thread, pipeline on a daemon thread."""
     from PyQt6.QtCore import QTimer
@@ -299,7 +326,14 @@ def _run_with_ui(cfg: Config) -> None:
     _start_hotkey(cfg)
 
     def _handle_signal(_signum: int, _frame: object) -> None:
-        app.quit()
+        _request_ui_shutdown(
+            stop_event,
+            graceful_shutdown,
+            app,
+            force_exit=lambda: os._exit(0),
+            timer_factory=QTimer.singleShot,
+        )
+        sys.exit(0)
 
     signal.signal(signal.SIGINT, _handle_signal)
     signal.signal(signal.SIGTERM, _handle_signal)
@@ -317,7 +351,7 @@ def _run_with_ui(cfg: Config) -> None:
 
 def _run_headless(cfg: Config) -> None:
     """Pipeline only — no UI."""
-    from pipeline import run_pipeline
+    from pipeline import request_interrupt, run_pipeline
 
     stop_event = threading.Event()
     _warmup_voice(cfg)
@@ -331,13 +365,25 @@ def _run_headless(cfg: Config) -> None:
     pipeline_thread.start()
     _start_hotkey(cfg)
 
+    def _shutdown_headless() -> None:
+        print("\n👋 Shutting down Jarvis.")
+        stop_event.set()
+        request_interrupt()
+        if _scheduler is not None:
+            _scheduler.shutdown()
+
+    def _handle_signal(_signum: int, _frame: object) -> None:
+        _shutdown_headless()
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, _handle_signal)
+    signal.signal(signal.SIGTERM, _handle_signal)
+
     try:
         pipeline_thread.join()
     except KeyboardInterrupt:
-        print("\n👋 Shutting down Jarvis.")
-        stop_event.set()
-        if _scheduler is not None:
-            _scheduler.shutdown()
+        _shutdown_headless()
+        sys.exit(0)
 
 
 def _ensure_stdio_utf8() -> None:

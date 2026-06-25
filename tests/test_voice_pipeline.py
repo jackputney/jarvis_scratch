@@ -203,6 +203,7 @@ def test_await_followup_utterance_exits_after_max_misses(monkeypatch):
     pipeline = __import__("pipeline")
     pipeline._interrupt.clear()
     calls: list[int] = []
+    states: list[str] = []
 
     def fake_capture(*_a, **_k):
         calls.append(1)
@@ -216,10 +217,12 @@ def test_await_followup_utterance_exits_after_max_misses(monkeypatch):
     wake = threading.Event()
 
     text = _await_followup_utterance(
-        q, capturing, paused, cfg, lambda _s: None, wake, max_misses=MAX_FOLLOWUP_MISSES,
+        q, capturing, paused, cfg, states.append, wake, max_misses=MAX_FOLLOWUP_MISSES,
     )
     assert text is None
+    assert MAX_FOLLOWUP_MISSES == 3
     assert len(calls) == MAX_FOLLOWUP_MISSES
+    assert states[-1] == "IDLE"
 
 
 def test_await_followup_utterance_question_mode_retries_once(monkeypatch):

@@ -1,4 +1,4 @@
-"""Read-only access to Jarvis's own GitHub repository (jackputney/jarvis_scratch)."""
+"""Read and write access to Jarvis's own GitHub repository (jackputney/jarvis_scratch)."""
 
 from __future__ import annotations
 
@@ -63,7 +63,7 @@ def _headers(*, search: bool = False) -> dict[str, str] | None:
 def _missing_pat_message() -> str:
     return (
         "GitHub PAT not configured. Add GITHUB_PAT to .env "
-        "(read-only repo scope). See Hub → GitHub Self."
+        "(repo read/write scope). See Hub → GitHub Self."
     )
 
 
@@ -343,6 +343,7 @@ def get_own_issues_results(state: str = "open") -> tuple[list[dict[str, Any]], s
             "body": (item.get("body") or "")[:500],
             "labels": labels,
             "created_at": item.get("created_at", ""),
+            "html_url": item.get("html_url", ""),
         })
     return out, None
 
@@ -388,6 +389,209 @@ def resolve_tool_source_path(tool_name: str) -> tuple[str | None, str | None]:
         if content and not read_err:
             return path, content
     return None, None
+
+
+def _api_request(
+    method: str,
+    url: str,
+    *,
+    json_body: dict[str, Any] | None = None,
+    params: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any] | None, str | None]:
+    headers = _headers()
+    if headers is None:
+        return None, _missing_pat_message()
+    try:
+        import requests
+    except ImportError as exc:
+        return None, f"GitHub error: {exc}"
+    try:
+        resp = requests.request(
+            method.upper(),
+            url,
+            headers=headers,
+            json=json_body,
+            params=params,
+            timeout=20,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("GitHub %s %s failed: %s", method, url, exc)
+        return None, f"GitHub request failed: {exc}"
+    if resp.status_code >= 400:
+        return None, _http_error_message(resp.status_code, resp.text)
+    if resp.status_code == 204 or not resp.content:
+        return {}, None
+    try:
+        payload = resp.json()
+    except ValueError:
+        return None, "GitHub returned invalid JSON."
+    return payload, None
+
+
+def _repo_api_base() -> str:
+    repo, _branch = _repo_settings()
+    return f"https://api.github.com/repos/{repo}"
+
+
+def _branch_url(branch: str) -> str:
+    repo, _ = _repo_settings()
+    return f"https://github.com/{repo}/tree/{quote(branch, safe='/')}"
+
+
+def _normalise_branch_name(name: str) -> str:
+    cleaned = (name or "").strip()
+    if not cleaned:
+        raise ValueError("Branch name is required.")
+    if ".." in cleaned or cleaned.startswith("/") or cleaned.endswith("/"):
+        raise ValueError("Invalid branch name.")
+    if not re.match(r"^[A-Za-z0-9._/-]+$", cleaned):
+        raise ValueError("Branch name contains invalid characters.")
+    return cleaned
+
+
+def create_own_branch(branch_name: str, from_branch: str = "main") -> str:
+    """Create a new branch from an existing ref."""
+    try:
+        branch = _normalise_branch_name(branch_name)
+        base = (from_branch or "main").strip()
+    except ValueError as exc:
+        return str(exc)
+
+    repo_base = _repo_api_base()
+    ref_payload, err = _api_request("GET", f"{repo_base}/git/ref/heads/{quote(base, safe='/')}")
+    if err:
+        return err
+    sha = ((ref_payload or {}).get("object") or {}).get("sha")
+    if not sha:
+        return f"Could not resolve SHA for branch {base}."
+
+    created, err = _api_request(
+        "POST",
+        f"{repo_base}/git/refs",
+        json_body={"ref": f"refs/heads/{branch}", "sha": sha},
+    )
+    if err:
+        if "422" in err or "already exists" in err.lower():
+            return f"Branch already exists: {_branch_url(branch)}"
+        return err
+    return _branch_url(branch)
+
+
+def create_own_file(path: str, content: str, message: str, branch: str = "main") -> str:
+    """Create or update a file in the repo (base64-encoded on the wire)."""
+    try:
+        repo_path = _normalise_repo_path(path)
+    except ValueError as exc:
+        return str(exc)
+    if not (message or "").strip():
+        return "Commit message is required."
+
+    repo_base = _repo_api_base()
+    branch = (branch or "main").strip()
+    url = f"{repo_base}/contents/{quote(repo_path, safe='/')}"
+
+    existing, err = _api_request("GET", url, params={"ref": branch})
+    sha = None
+    if err and "404" not in err:
+        return err
+    if not err and isinstance(existing, dict):
+        sha = existing.get("sha")
+
+    body: dict[str, Any] = {
+        "message": message.strip(),
+        "content": base64.b64encode((content or "").encode("utf-8")).decode("ascii"),
+        "branch": branch,
+    }
+    if sha:
+        body["sha"] = sha
+
+    payload, err = _api_request("PUT", url, json_body=body)
+    if err:
+        return err
+    commit = (payload or {}).get("commit") or {}
+    return commit.get("html_url") or f"Updated {repo_path} on {branch}."
+
+
+def create_own_pr(title: str, body: str, head: str, base: str = "main") -> str:
+    """Open a pull request."""
+    title = (title or "").strip()
+    head = (head or "").strip()
+    base = (base or "main").strip()
+    if not title or not head:
+        return "Title and head branch are required."
+
+    payload, err = _api_request(
+        "POST",
+        f"{_repo_api_base()}/pulls",
+        json_body={"title": title, "body": body or "", "head": head, "base": base},
+    )
+    if err:
+        return err
+    return (payload or {}).get("html_url") or "Pull request created."
+
+
+def create_own_issue(title: str, body: str, labels: list[str] | None = None) -> str:
+    """Create a GitHub issue on the Jarvis repo."""
+    title = (title or "").strip()
+    if not title:
+        return "Issue title is required."
+    label_list = [str(l).strip() for l in (labels or []) if str(l).strip()]
+
+    payload, err = _api_request(
+        "POST",
+        f"{_repo_api_base()}/issues",
+        json_body={"title": title, "body": body or "", "labels": label_list},
+    )
+    if err:
+        return err
+    return (payload or {}).get("html_url") or "Issue created."
+
+
+def create_own_issue_url(title: str, body: str, labels: list[str] | None = None) -> tuple[str | None, str | None]:
+    """Internal helper returning (url, error)."""
+    result = create_own_issue(title, body, labels)
+    if result.startswith("GitHub") or result.startswith("Issue title"):
+        return None, result
+    if "http" not in result:
+        return None, result
+    return result, None
+
+
+def comment_own_issue(issue_number: int, body: str) -> str:
+    """Post a comment on an existing issue."""
+    text = (body or "").strip()
+    if not text:
+        return "Comment body is required."
+    try:
+        number = int(issue_number)
+    except (TypeError, ValueError):
+        return "Invalid issue number."
+
+    payload, err = _api_request(
+        "POST",
+        f"{_repo_api_base()}/issues/{number}/comments",
+        json_body={"body": text},
+    )
+    if err:
+        return err
+    return (payload or {}).get("html_url") or f"Comment added to issue #{number}."
+
+
+def extract_file_path_from_text(text: str) -> str | None:
+    """Best-effort repo-relative path from proposed_change or evidence."""
+    if not (text or "").strip():
+        return None
+    patterns = [
+        r"Current code \(([A-Za-z0-9_./-]+\.(?:py|md|json|js|css|yaml|yml|txt|spec\.md))\)",
+        r"`([A-Za-z0-9_./-]+\.(?:py|md|json|js|css|yaml|yml|txt|spec\.md))`",
+        r"\b((?:tools|improvement|dashboard|memory|orchestrator|ui)/[A-Za-z0-9_./-]+\.(?:py|md|json))\b",
+        r"\b([A-Za-z0-9_]+\.py)\b",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            return match.group(1).lstrip("/")
+    return None
 
 
 def numbered_snippet(content: str, *, max_lines: int = 40) -> str:

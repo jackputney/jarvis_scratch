@@ -914,6 +914,13 @@ ul.notes li .title:hover { color: var(--accent-bright); }
 .thinks-body { margin: 0 0 10px; font-size: 13px; line-height: 1.55; color: var(--text-soft); }
 .thinks-change { margin: 0 0 12px; padding: 12px; background: rgba(0, 0, 0, 0.25); border: 1px solid var(--border); border-radius: 8px; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 12px; line-height: 1.45; white-space: pre-wrap; overflow-x: auto; }
 .thinks-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.thinks-actions a { color: var(--accent); text-decoration: none; }
+.thinks-section-head { margin: 28px 0 14px; border-top: 1px solid var(--border); padding-top: 20px; }
+.thinks-section-head h2 { margin: 0 0 2px; font-size: 15px; font-weight: 600; }
+.thinks-section-head .sub { font-size: 12px; color: var(--muted); }
+.thinks-no-issues { color: var(--muted); font-size: 13px; margin: 0; }
+.thinks-card-head h3 a { color: inherit; text-decoration: none; }
+.thinks-card-head h3 a:hover { text-decoration: underline; }
 .hub-int-card {
   text-align: left;
   cursor: pointer;

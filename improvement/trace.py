@@ -109,6 +109,11 @@ def _ensure_writer() -> None:
                             "UPDATE suggestions SET status = ? WHERE id = ?",
                             args,
                         )
+                    elif op == "suggestion_github":
+                        conn.execute(
+                            "UPDATE suggestions SET github_issue_url = ? WHERE id = ?",
+                            args,
+                        )
                     conn.commit()
                 except Exception as exc:  # noqa: BLE001
                     logger.error("⚠️  Improvement write failed (%s): %s", op, exc, exc_info=True)

@@ -91,7 +91,16 @@ def test_suggestions_api(client, improvement_db, monkeypatch):
     listed = client.get("/api/improvement/suggestions?status=pending&limit=5").get_json()
     assert any(s["id"] == sid for s in listed["suggestions"])
 
-    assert client.post(f"/api/improvement/suggestions/{sid}/accept").status_code == 200
+    monkeypatch.setattr(
+        "tools.github_self.create_own_branch",
+        lambda name, from_branch="main": f"https://github.com/o/r/tree/{name}",
+    )
+    monkeypatch.setattr(
+        "tools.github_self.create_own_issue_url",
+        lambda title, body, labels=None: ("https://github.com/o/r/issues/1", None),
+    )
+    accept = client.post(f"/api/improvement/suggestions/{sid}/accept").get_json()
+    assert accept.get("ok") is True
 
     monkeypatch.setattr("improvement.reflect.run_reflection", lambda: [])
     resp = client.post("/api/improvement/suggestions/generate").get_json()
