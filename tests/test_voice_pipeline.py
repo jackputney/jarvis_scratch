@@ -85,9 +85,11 @@ def test_trailing_silence_ms_reads_config(temp_env, monkeypatch):
 
 def test_audio_loop_feeds_predict_frombuffer_not_struct_unpack():
     """F3 — predict() must receive a numpy int16 buffer, not struct.unpack tuples."""
-    import pipeline
+    import inspect
 
-    src = inspect.getsource(pipeline._audio_loop)
+    from adapters import audio_io
+
+    src = inspect.getsource(audio_io.audio_loop)
     assert "np.frombuffer" in src
     assert "struct.unpack" not in src
 
@@ -218,6 +220,34 @@ def test_await_followup_utterance_exits_after_max_misses(monkeypatch):
     )
     assert text is None
     assert len(calls) == MAX_FOLLOWUP_MISSES
+
+
+def test_await_followup_utterance_question_mode_retries_once(monkeypatch):
+    pipeline = __import__("pipeline")
+    pipeline._interrupt.clear()
+    calls: list[int] = []
+    results = [None, "yes please"]
+
+    def fake_capture(*_a, **kwargs):
+        calls.append(kwargs.get("wait_for_speech_frames", 0))
+        return results.pop(0)
+
+    monkeypatch.setattr(pipeline, "_capture_and_transcribe", fake_capture)
+    cfg = Config()
+    q: queue.Queue[bytes] = queue.Queue()
+    capturing = threading.Event()
+    paused = threading.Event()
+    wake = threading.Event()
+
+    text = _await_followup_utterance(
+        q, capturing, paused, cfg, lambda _s: None, wake,
+        last_reply="Sound good?",
+        max_misses=1,
+    )
+    assert text == "yes please"
+    assert len(calls) == 2
+    assert calls[0] == _answer_wait_frames(cfg)
+    assert calls[1] == _answer_wait_frames(cfg)
 
 
 def test_await_followup_utterance_end_phrase(monkeypatch):

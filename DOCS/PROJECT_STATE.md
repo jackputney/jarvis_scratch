@@ -1,7 +1,7 @@
 # Project State
 
 <!-- AGENTS: Update this file every session. Takes 2 minutes. -->
-<!-- Last updated: 2026-06-24 | Updated by: Cursor acting for Oliver -->
+<!-- Last updated: 2026-06-25 | Updated by: Cursor acting for Oliver -->
 
 ## Quick status
 
@@ -27,7 +27,6 @@
 |--------|-------|--------|
 | main | both | v0.5.0 tagged and pushed |
 | oliver/sprint-6 | Oliver | Placeholder — next Windows/adapter work |
-| Oliver_Jarvis_smarter | Oliver | Unmerged — wake-word barge-in, relevance memory, prompt caching |
 
 ## Known issues
 
@@ -35,7 +34,7 @@
 |-------|----------|--------|
 | Self-improvement Stage 2–4 not started | Medium | Stage 2 (golden set + judge) is next |
 | Windows venv on Python 3.14 | Medium | Recreate with 3.12; `webrtcvad` missing → energy VAD only |
-| Adapter layer only has STT | Medium | AudioIO, AppControl, LaunchAtLogin still inline |
+| Adapter layer only has STT + AudioIO | Medium | AppControl, LaunchAtLogin still inline |
 | Home Assistant tools not implemented | Low | Hub UI exists, no tools |
 | Music playback control Windows gap | Low | open_app works; play/pause macOS-only |
 | Abort trap on Ctrl+C | Low | Cosmetic — PyQt6 shutdown quirk |
@@ -56,10 +55,9 @@
 ## Next actions
 
 1. Oliver: recreate Windows venv on Python 3.12; live smoke-test sprint-5 fixes
-2. Migrate `AudioIO` adapter (next platform step per PLATFORM.md)
-3. Self-improvement Stage 2 — golden set + LLM judge
-4. Review `Oliver_Jarvis_smarter` for merge (wake-word barge-in, relevance memory)
-5. Update stale docs after each sprint (this file, ARCHITECTURE.md, .cursorrules)
+2. Migrate `AppControl` adapter (next platform step per PLATFORM.md)
+3. Self-improvement Stage 2 — run `python tests/evals/run_evals.py` for baseline; expand golden set
+4. Update stale docs after each sprint (this file, ARCHITECTURE.md, .cursorrules)
 
 ## Repo
 

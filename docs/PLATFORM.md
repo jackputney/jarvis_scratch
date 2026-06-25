@@ -52,7 +52,7 @@ selected **once** at startup instead of scattered `if platform.system()` checks.
 | Adapter | Replaces | macOS / Windows |
 |---------|----------|-----------------|
 | **`STTBackend`** ✅ done | inline `pipeline._transcribe` | mlx-whisper / faster-whisper |
-| `AudioIO` | pipeline audio loop + `cartesia._OutputStream` | sounddevice/pyaudio + sample rate |
+| **`AudioIO`** ✅ done | pipeline audio loop | sounddevice/pyaudio + VAD helpers in `adapters/audio_io.py` |
 | `SystemControl` | `device_control.py` | osascript / PowerShell |
 | `AppControl` | `system.py` + `media.py` + `music.py` | AppleScript / Start-Process |
 | `LaunchAtLogin` | `login_item.py` | launchctl / Task Scheduler (new) |

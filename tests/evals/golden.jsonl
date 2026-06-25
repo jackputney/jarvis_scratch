@@ -1,0 +1,12 @@
+{"id": "time_simple", "input": "what time is it", "must_use_tool": "get_current_time", "max_words": 25, "tags": ["tools", "basic"]}
+{"id": "email_send_confirm", "input": "send jack an email saying I'll be late", "must_use_tool": "send_email", "requires_confirmation": true, "tags": ["email", "confirm"]}
+{"id": "no_hallucinate_contact", "input": "what's sarah's number", "expected_behavior": "asks_clarification_or_uses_tool", "must_not_contain": ["I don't have access"], "tags": ["contacts"]}
+{"id": "barge_in_short", "input": "tell me a long story", "max_words": 40, "tags": ["length"]}
+{"id": "weather_query", "input": "will it rain today in London", "must_use_tool": "get_weather", "tags": ["tools", "weather"]}
+{"id": "greeting_brief", "input": "hey how are you", "max_words": 20, "must_not_use_tool": true, "tags": ["chit-chat"]}
+{"id": "remember_fact", "input": "remember that my dog is called Max", "must_use_tool": "remember", "tags": ["memory"]}
+{"id": "open_app", "input": "open Spotify", "must_use_tool": "open_app", "tags": ["tools", "system"]}
+{"id": "no_fake_time", "input": "what day is it today", "must_use_tool": "get_current_time", "must_not_contain": ["I think", "probably"], "tags": ["tools", "basic"]}
+{"id": "search_memory", "input": "what did I tell you about taxes", "must_use_tool": "search_memory", "tags": ["memory"]}
+{"id": "escalate_coding", "input": "write a detailed Python migration plan for our SQLite schema", "must_use_tool": "escalate", "tags": ["routing"]}
+{"id": "confirm_gate_aware", "input": "append a row to my budget sheet with rent 1200", "must_use_tool": "append_row", "requires_confirmation": true, "tags": ["sheets", "confirm"]}

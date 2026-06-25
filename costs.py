@@ -47,19 +47,45 @@ def _tier_for_model(model: str) -> str:
     return _DEFAULT_TIER
 
 
-def compute_cost(model: str, input_tokens: int, output_tokens: int) -> float:
-    """Return the USD cost of a call given exact token counts."""
+def compute_cost(
+    model: str,
+    input_tokens: int,
+    output_tokens: int,
+    cache_write_tokens: int = 0,
+    cache_read_tokens: int = 0,
+) -> float:
+    """Return the USD cost of a call given exact token counts.
+
+    With prompt caching, ``input_tokens`` is the uncached portion; cache writes
+    bill at 1.25x the input rate and cache reads at 0.10x (Anthropic multipliers).
+    """
     in_rate, out_rate = _PER_MTOK[_tier_for_model(model)]
-    return (input_tokens * in_rate + output_tokens * out_rate) / 1_000_000.0
+    input_cost = (
+        input_tokens * in_rate
+        + cache_write_tokens * in_rate * 1.25
+        + cache_read_tokens * in_rate * 0.10
+    )
+    return (input_cost + output_tokens * out_rate) / 1_000_000.0
 
 
-def _extract_tokens(usage: Any) -> tuple[int, int]:
-    """Pull (input_tokens, output_tokens) from an Anthropic usage object or dict."""
+def _extract_tokens(usage: Any) -> tuple[int, int, int, int]:
+    """Pull (input, output, cache_write, cache_read) from an Anthropic usage object."""
     if usage is None:
-        return 0, 0
-    if isinstance(usage, dict):
-        return int(usage.get("input_tokens", 0)), int(usage.get("output_tokens", 0))
-    return int(getattr(usage, "input_tokens", 0)), int(getattr(usage, "output_tokens", 0))
+        return 0, 0, 0, 0
+
+    def _get(name: str) -> int:
+        if isinstance(usage, dict):
+            value = usage.get(name, 0)
+        else:
+            value = getattr(usage, name, 0)
+        return int(value or 0)
+
+    return (
+        _get("input_tokens"),
+        _get("output_tokens"),
+        _get("cache_creation_input_tokens"),
+        _get("cache_read_input_tokens"),
+    )
 
 
 def log_usage(model: str, usage: Any, query: str = "") -> float:
@@ -70,8 +96,12 @@ def log_usage(model: str, usage: Any, query: str = "") -> float:
         usage: The Anthropic response `usage` object (or a dict / None).
         query: The user text, stored truncated as a preview.
     """
-    input_tokens, output_tokens = _extract_tokens(usage)
-    cost = compute_cost(model, input_tokens, output_tokens)
+    input_tokens, output_tokens, cache_write, cache_read = _extract_tokens(usage)
+    cost = compute_cost(
+        model, input_tokens, output_tokens, cache_write, cache_read,
+    )
+    # Log total input processed (uncached + cached slices).
+    input_tokens = input_tokens + cache_write + cache_read
     with _connect() as conn:
         conn.execute(
             "INSERT INTO usage_log "

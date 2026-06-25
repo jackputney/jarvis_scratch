@@ -314,19 +314,6 @@ class Config:
         Config.invalidate_cache()
         return Config.load()
 
-    def route_to_fast_model(self, text: str) -> bool:
-        words = text.split()
-        if len(words) <= self.routing_word_threshold:
-            return True
-        complex_keywords = {"explain", "write", "generate", "summarise", "summarize",
-                            "analyse", "analyze", "compare", "plan", "design", "create",
-                            "draft", "list all", "give me a", "how do i"}
-        lower = text.lower()
-        for kw in complex_keywords:
-            if kw in lower:
-                return False
-        return len(words) <= self.routing_word_threshold + 10
-
 
 def load_config() -> Config:
     return Config.load()
