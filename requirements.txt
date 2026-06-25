@@ -68,5 +68,8 @@ python-pptx>=0.6.21
 # Global hotkey (cross-platform: macOS + Windows)
 pynput>=1.7.0
 
+# System monitoring (CPU/RAM/disk, processes, active window)
+psutil>=6.0.0
+
 # Native dashboard window (macOS + Windows; Edge WebView2 on Windows)
 pywebview>=5.0

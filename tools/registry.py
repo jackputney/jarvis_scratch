@@ -47,6 +47,7 @@ from tools.music import (
     skip as music_skip,
 )
 from tools.pitch_deck import create_pitch_deck
+from tools.system_info import active_window, list_processes, system_info as pc_system_info
 from memory.semantic import remember as remember_fact, search as search_memory_index
 from memory.variables import get_variable, set_variable
 from tools.github import create_github_comment, get_github_repo_summary, search_github_issues
@@ -318,6 +319,21 @@ TOOL_DEFINITIONS: list[dict] = [
             },
             "required": ["action"],
         },
+    },
+    {
+        "name": "system_info",
+        "description": "Get local CPU, RAM, and disk usage percentages.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "list_processes",
+        "description": "List the top 20 running processes sorted by CPU usage.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "active_window",
+        "description": "Get the title of the currently focused window (Windows).",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
     },
     {
         "name": "find_file",
@@ -873,6 +889,9 @@ TOOL_DISPATCH: dict[str, callable] = {
     "get_now_playing": lambda **kw: get_now_playing(),
     "search_and_play": lambda **kw: search_and_play(kw["query"]),
     "media_control": lambda **kw: media_control(kw["action"]),
+    "system_info": lambda **kw: pc_system_info(),
+    "list_processes": lambda **kw: list_processes(),
+    "active_window": lambda **kw: active_window(),
     "find_file": lambda **kw: find_file(kw["query"], kw.get("file_type", "")),
     "find_and_open_file": lambda **kw: find_and_open_file(kw["query"], kw.get("file_type", "")),
     "open_photos": lambda **kw: open_photos(kw.get("query", "")),
@@ -956,6 +975,9 @@ READ_ONLY_TOOLS = frozenset({
     "get_own_issues",
     "get_battery_status",
     "get_system_info",
+    "system_info",
+    "list_processes",
+    "active_window",
     "find_file",
     "get_recent_files",
     "open_downloads",
