@@ -1607,7 +1607,14 @@ function handleSSE(data) {
       if (data.muted != null) updateMuteDisplay(data.muted);
       break;
     case "job.transcript":
-      if (data.heard) addActivity("💬", `${data.heard} → ${(data.reply || "").slice(0, 60)}`);
+      if (data.heard) {
+        addActivity("💬", `${data.heard} → ${(data.reply || "").slice(0, 60)}`);
+        const replyEl = $("dock-reply");
+        if (replyEl && data.reply) {
+          replyEl.textContent = data.reply;
+          replyEl.classList.add("show");
+        }
+      }
       refreshActivityTimestamps();
       refresh();
       break;
@@ -1709,6 +1716,43 @@ function renderThinksCards(items) {
   });
 }
 
+function renderGithubIssues(issues) {
+  const wrap = $("thinks-github-issues");
+  if (!wrap) return;
+  if (!issues.length) {
+    wrap.innerHTML = `<p class="thinks-no-issues">No open issues.</p>`;
+    return;
+  }
+  wrap.innerHTML = issues.map((iss) =>
+    `<div class="thinks-card panel">` +
+    `<div class="thinks-card-head">` +
+    `<span class="thinks-sev sev-low">#${esc(String(iss.number))}</span>` +
+    `<h3><a href="${esc(iss.html_url)}" target="_blank" rel="noreferrer">${esc(iss.title)}</a></h3>` +
+    `</div>` +
+    `<p class="thinks-body">${esc((iss.body || "").slice(0, 200))}${iss.body && iss.body.length > 200 ? "…" : ""}</p>` +
+    `<div class="thinks-actions">` +
+    `<a href="${esc(iss.html_url)}" target="_blank" rel="noreferrer" class="ghost">Open on GitHub</a>` +
+    `</div>` +
+    `</div>`
+  ).join("");
+}
+
+async function loadThinksGithubIssues() {
+  const wrap = $("thinks-github-issues");
+  if (!wrap) return;
+  wrap.innerHTML = `<p class="thinks-no-issues">Loading…</p>`;
+  try {
+    const data = await getJSON("/api/github/issues");
+    if (data.ok) {
+      renderGithubIssues(data.issues || []);
+    } else {
+      wrap.innerHTML = `<p class="thinks-no-issues">${esc(data.error || "Could not load issues.")}</p>`;
+    }
+  } catch {
+    wrap.innerHTML = `<p class="thinks-no-issues">Could not load GitHub issues.</p>`;
+  }
+}
+
 async function loadThinksView() {
   await loadThinksStats();
   try {
@@ -1717,6 +1761,7 @@ async function loadThinksView() {
   } catch {
     renderThinksCards([]);
   }
+  await loadThinksGithubIssues();
 }
 
 async function generateThinks() {

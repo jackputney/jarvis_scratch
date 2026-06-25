@@ -244,6 +244,14 @@ def create_app() -> Flask:
         items = run_reflection()
         return jsonify({"ok": True, "count": len(items), "suggestions": items})
 
+    @app.route("/api/github/issues")
+    def api_github_issues():  # noqa: ANN202
+        from tools.github_self import get_own_issues_results
+        issues, err = get_own_issues_results(state="open")
+        if err:
+            return jsonify({"ok": False, "error": err, "issues": []})
+        return jsonify({"ok": True, "issues": issues})
+
     # -- Real-time event stream (SSE) --------------------------------------
     @app.route("/api/events")
     def api_events():  # noqa: ANN202
