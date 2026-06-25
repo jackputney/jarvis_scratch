@@ -36,6 +36,7 @@ from tools.media import (
     open_photos,
     open_podcasts,
 )
+from tools.media_control import media_control
 from tools.music import (
     get_now_playing,
     pause as music_pause,
@@ -298,6 +299,24 @@ TOOL_DEFINITIONS: list[dict] = [
                 "query": {"type": "string", "description": "Song, artist, or album to search for."},
             },
             "required": ["query"],
+        },
+    },
+    {
+        "name": "media_control",
+        "description": (
+            "Control media playback globally on Windows using system media keys. Works with whatever "
+            "app has media focus (Spotify, YouTube in browser, etc.). Actions: play, pause, "
+            "play_pause, skip, next, previous, prev."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "description": "play, pause, play_pause, skip, next, previous, or prev.",
+                },
+            },
+            "required": ["action"],
         },
     },
     {
@@ -853,6 +872,7 @@ TOOL_DISPATCH: dict[str, callable] = {
     "music_set_volume": lambda **kw: music_set_volume(int(kw["level"])),
     "get_now_playing": lambda **kw: get_now_playing(),
     "search_and_play": lambda **kw: search_and_play(kw["query"]),
+    "media_control": lambda **kw: media_control(kw["action"]),
     "find_file": lambda **kw: find_file(kw["query"], kw.get("file_type", "")),
     "find_and_open_file": lambda **kw: find_and_open_file(kw["query"], kw.get("file_type", "")),
     "open_photos": lambda **kw: open_photos(kw.get("query", "")),
@@ -976,6 +996,7 @@ MODERATE_TOOLS = frozenset({
     "music_set_volume",
     "get_now_playing",
     "search_and_play",
+    "media_control",
 })
 
 # High-risk mutating tools — dashboard confirm required when confirm_before_execute is on.
