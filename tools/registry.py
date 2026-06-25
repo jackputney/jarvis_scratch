@@ -68,6 +68,7 @@ from tools.system import open_app
 from tools.time_date import get_current_time
 from tools.weather import get_weather
 from tools.web import web_search
+from updater import apply_update, check_and_prompt_update, check_for_updates, restart_jarvis
 
 # ---------------------------------------------------------------------------
 # Anthropic tool definitions — passed verbatim as the tools= parameter.
@@ -872,6 +873,27 @@ TOOL_DEFINITIONS: list[dict] = [
             "required": [],
         },
     },
+    {
+        "name": "check_for_updates",
+        "description": (
+            "Check if a newer version of Jarvis is available on GitHub. "
+            "Returns a spoken summary like 'An update is available with 3 new commits'."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "apply_update",
+        "description": (
+            "Download and install the latest Jarvis update from GitHub (fast-forward only — "
+            "will not overwrite local changes). Returns success/failure."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "restart_jarvis",
+        "description": "Restart Jarvis to apply an update or recover from errors.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
 ]
 
 # ---------------------------------------------------------------------------
@@ -963,6 +985,9 @@ TOOL_DISPATCH: dict[str, callable] = {
     "search_own_code": lambda **kw: search_own_code(kw["query"]),
     "get_own_commits": lambda **kw: get_own_commits(int(kw.get("limit") or 10)),
     "get_own_issues": lambda **kw: get_own_issues(kw.get("state", "open")),
+    "check_for_updates": lambda **kw: check_and_prompt_update(),
+    "apply_update": lambda **kw: _format_update_result(apply_update()),
+    "restart_jarvis": lambda **kw: restart_jarvis(),
 }
 
 # Read-only tools — never confirm.
@@ -1001,6 +1026,7 @@ READ_ONLY_TOOLS = frozenset({
     "get_recent_files",
     "open_downloads",
     "open_desktop",
+    "check_for_updates",
 })
 
 # Low-risk mutating tools — auto-allow in voice mode (confirm gate does not apply).
@@ -1049,11 +1075,19 @@ CONFIRM_REQUIRED_TOOLS = frozenset({
     "send_slack_message",
     "create_github_comment",
     "create_pitch_deck",
+    "apply_update",
+    "restart_jarvis",
 })
 
 # Dashboard /api/tools/run two-step confirm. Includes voice auto-allow tools that
 # are still too risky to run from the UI without explicit confirmation.
 DASHBOARD_CONFIRM_TOOLS = CONFIRM_REQUIRED_TOOLS | MODERATE_TOOLS | frozenset({"send_email"})
+
+
+def _format_update_result(result: dict) -> str:
+    if result["success"]:
+        return f"Update applied successfully. Jarvis moved from {result['old_sha'][:7]} to {result['new_sha'][:7]}. Say 'restart Jarvis' to activate it."
+    return f"Update failed: {result['error']}"
 
 
 def _format_memory_hits(hits: list[dict]) -> str:

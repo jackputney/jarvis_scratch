@@ -23,6 +23,14 @@ from voice.speech_state import BargeInGate, SpeechPhase
 
 logger = logging.getLogger("jarvis.adapters.audio_io")
 
+
+def _log_wake(word: str, confidence: float, accepted: bool) -> None:
+    try:
+        from adapters.wake_metrics import log_wake_event
+        log_wake_event(word, confidence, accepted)
+    except Exception:  # noqa: BLE001
+        pass
+
 try:
     import pyaudio
 except ImportError:
@@ -222,16 +230,21 @@ def audio_loop(
             for name, scores in oww_model.prediction_buffer.items():
                 if len(scores) < hits:
                     continue
-                if all(scores[-i] > threshold for i in range(1, hits + 1)):
+                score = scores[-1]
+                accepted = all(scores[-i] > threshold for i in range(1, hits + 1))
+                if accepted:
                     logger.info(
                         "🎙️  Wake word '%s' detected (score=%.2f)",
-                        name, scores[-1],
+                        name, score,
                     )
+                    _log_wake(name, score, True)
                     _reset_oww(oww_model)
                     capture_queue.put(data)
                     capturing.set()
                     wake_event.set()
                     break
+                elif score > threshold * 0.5:
+                    _log_wake(name, score, False)
     finally:
         if use_sounddevice and sd_stream is not None:
             sd_stream.stop()

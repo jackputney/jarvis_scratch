@@ -379,6 +379,9 @@ def main() -> None:
     cfg = Config.load()
     _check_keys(cfg)
     _init_persistence()
+
+    from telemetry import install_crash_handler
+    install_crash_handler()
     _prepare_google(cfg)
     _prepare_wake_word(cfg)
     _start_dashboard()
