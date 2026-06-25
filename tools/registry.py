@@ -63,6 +63,7 @@ from tools.github_self import (
     read_own_file,
     search_own_code,
 )
+from tools.dev_log import append_dev_log_entry, get_dev_log_summary, read_dev_log
 from tools.google_calendar import get_calendar_events, get_todays_schedule
 from tools.google_contacts import list_contacts, search_contacts
 from tools.google_drive import read_drive_file, search_drive
@@ -968,6 +969,34 @@ TOOL_DEFINITIONS: list[dict] = [
         "description": "Restart Jarvis to apply an update or recover from errors.",
         "input_schema": {"type": "object", "properties": {}, "required": []},
     },
+    {
+        "name": "read_dev_log",
+        "description": "Read the full Jarvis Dev Log Google Doc — session history for Jack and Oliver.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "get_dev_log_summary",
+        "description": "Return the last 3 entries from the Jarvis Dev Log. Use for 'what did Oliver build today' or 'what happened recently' queries.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "append_dev_log_entry",
+        "description": "Append a new entry to the Jarvis Dev Log Google Doc. Use after sessions, reflections, or when the user says 'log this session' or 'update the dev log'.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "summary": {
+                    "type": "string",
+                    "description": "One or more lines describing what happened. Each line becomes a bullet point.",
+                },
+                "author": {
+                    "type": "string",
+                    "description": "Entry author name. Defaults to config dev_log_author.",
+                },
+            },
+            "required": ["summary"],
+        },
+    },
 ]
 
 # ---------------------------------------------------------------------------
@@ -1075,6 +1104,11 @@ TOOL_DISPATCH: dict[str, callable] = {
     "check_for_updates": lambda **kw: check_and_prompt_update(),
     "apply_update": lambda **kw: _format_update_result(apply_update()),
     "restart_jarvis": lambda **kw: restart_jarvis(),
+    "read_dev_log": lambda **kw: read_dev_log(),
+    "get_dev_log_summary": lambda **kw: get_dev_log_summary(),
+    "append_dev_log_entry": lambda **kw: append_dev_log_entry(
+        kw["summary"], kw.get("author", ""),
+    ),
 }
 
 # Read-only tools — never confirm.
@@ -1103,6 +1137,8 @@ READ_ONLY_TOOLS = frozenset({
     "search_own_code",
     "get_own_commits",
     "get_own_issues",
+    "read_dev_log",
+    "get_dev_log_summary",
     "get_battery_status",
     "get_system_info",
     "system_info",
@@ -1155,6 +1191,7 @@ MODERATE_TOOLS = frozenset({
     "create_own_branch",
     "create_own_issue",
     "comment_own_issue",
+    "append_dev_log_entry",
 })
 
 # High-risk mutating tools — dashboard confirm required when confirm_before_execute is on.
