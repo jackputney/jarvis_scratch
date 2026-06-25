@@ -7,7 +7,7 @@
 
 | Item | Value |
 |------|-------|
-| Tests | 497+ passing on Windows (7 darwin skips) |
+| Tests | 517 passing on macOS (sprint-8); 497+ on Windows |
 | Main tag | v0.5.0 (eced13b); sprint-6 work merged on top |
 | Branch | `main` — all work consolidated |
 | Jack branch | `jack/sprint-6` (merged into main) |

@@ -144,6 +144,24 @@ def set_brightness(level: int) -> str:
 
     system = platform.system()
     try:
+        if system == "Darwin":
+            result = subprocess.run(
+                ["osascript", "-e", f"tell application \"System Events\" to set brightness of first display to {level / 100}"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode == 0:
+                return f"Brightness set to {level}%."
+            # Fall back to the third-party brightness CLI if available
+            result2 = subprocess.run(
+                ["brightness", str(level / 100)],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result2.returncode == 0:
+                return f"Brightness set to {level}%."
+            return (
+                f"Couldn't set brightness on macOS ({result.stderr.strip() or 'osascript failed'}). "
+                "Install the 'brightness' CLI (brew install brightness) for reliable control."
+            )
         if system == "Windows":
             script = (
                 "(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightnessMethods)"
@@ -321,8 +339,23 @@ def set_wifi(action: str) -> str:
     if state not in ("on", "off"):
         return f"Refused: WiFi action must be 'on' or 'off', not {action!r}."
     try:
+        # Detect the active Wi-Fi interface dynamically rather than hardcoding en0
+        iface_result = subprocess.run(
+            ["networksetup", "-listallhardwareports"],
+            capture_output=True, text=True, timeout=PS_TIMEOUT,
+        )
+        wifi_iface = "en0"  # sensible default
+        lines = iface_result.stdout.splitlines()
+        for i, line in enumerate(lines):
+            if "Wi-Fi" in line or "AirPort" in line:
+                for j in range(i + 1, min(i + 4, len(lines))):
+                    if lines[j].startswith("Device:"):
+                        wifi_iface = lines[j].split(":", 1)[1].strip()
+                        break
+                break
+
         result = subprocess.run(
-            ["networksetup", "-setairportpower", "en0", state],
+            ["networksetup", "-setairportpower", wifi_iface, state],
             capture_output=True,
             text=True,
             timeout=PS_TIMEOUT,

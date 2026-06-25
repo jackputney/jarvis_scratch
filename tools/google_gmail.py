@@ -10,10 +10,13 @@ from __future__ import annotations
 
 import base64
 import html
+import logging
 import re
 from email.mime.text import MIMEText
 
 from tools.google_auth import get_google_service
+
+logger = logging.getLogger("jarvis.tools.google_gmail")
 
 MAX_RESULTS = 5
 SNIPPET_CHARS = 200
@@ -113,7 +116,8 @@ def fetch_thread_context(thread_id: str, max_messages: int = 4) -> str:
             format="metadata",
             metadataHeaders=["From", "Subject", "Date"],
         ).execute()
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("fetch_thread_context failed for thread %s: %s", thread_id, exc)
         return ""
     chunks: list[str] = []
     for msg in thread.get("messages", [])[-max(1, min(int(max_messages), 8)):]:
