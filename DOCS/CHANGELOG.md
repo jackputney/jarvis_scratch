@@ -27,6 +27,27 @@
 
 ---
 
+### 2026-06-25 — native Dev Log append/read via Google Docs API — Jack
+
+[Agent: Cursor — acting for Jack — 2026-06-25]
+
+**Branch:** jack/sprint-7 | **Tests:** 457 passing
+
+**What changed:**
+- `tools/dev_log.py` — new `read_dev_log`, `get_dev_log_summary`, `append_dev_log_entry` tools backed by the Google Docs API; entries inserted at the top of the `## LOG` section.
+- `tools/google_auth.py` — added `https://www.googleapis.com/auth/documents` OAuth scope.
+- `config.py` — added `dev_log_doc_id` (shared sprint doc ID default) and `dev_log_author` ("Jack's Claude" default); both persisted via config.json so each machine can set its own author.
+- `tools/registry.py` — registered all three dev-log tools (`read_dev_log` + `get_dev_log_summary` in `READ_ONLY_TOOLS`, `append_dev_log_entry` in `MODERATE_TOOLS`); added tool definitions with descriptions.
+- `improvement/reflect.py` — `_auto_log_reflection` hook appends a brief summary to the Dev Log after every reflection run when Google OAuth is configured; silently skipped if not set up.
+- `tests/test_dev_log.py` — 17 tests covering read, append, summary, error handling, entry format, and config-driven author.
+- `DOCS/FEATURE_DOCS/DEV_LOG.md` — full feature documentation.
+
+**Why:** Every session was creating a new Google Doc because there was no write path to the existing one. This lands a permanent fix — Jarvis appends to the same doc every session.
+
+**Watch out for:** If `memory/google_token.json` predates this change, the Docs scope is missing. Delete the token file and restart Jarvis once to re-auth. Oliver's `dev_log_author` should be set to "Oliver's Claude" in his `config.json`.
+
+---
+
 ### 2026-06-25 — terminal shutdown and empty-follow-up loop fix — Jack
 
 [Agent: Cursor — acting for Jack — 2026-06-25]

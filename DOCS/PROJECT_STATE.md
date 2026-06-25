@@ -1,16 +1,15 @@
 # Project State
 
 <!-- AGENTS: Update this file every session. Takes 2 minutes. -->
-<!-- Last updated: 2026-06-25 | Updated by: Cursor acting for Oliver -->
+<!-- Last updated: 2026-06-25 | Updated by: Cursor acting for Jack (rebase onto main) -->
 
 ## Quick status
 
 | Item | Value |
 |------|-------|
-| Tests | 497+ passing on Windows (7 darwin skips) |
+| Tests | 497+ passing on Windows (7 darwin skips); 457 on macOS |
 | Main tag | v0.5.0 (eced13b); sprint-6 work merged on top |
-| Branch | `main` — all work consolidated |
-| Jack branch | `jack/sprint-6` (merged into main) |
+| Jack branch | `jack/sprint-7` — dev log tools, PR #6 open |
 | Oliver branch | `oliver/sprint-6` (merged into main) |
 
 ## What's on main (v0.5.0)

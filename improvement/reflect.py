@@ -492,4 +492,42 @@ def run_reflection() -> list[dict[str, Any]]:
         })
     flush_writes()
     logger.info("💡 Reflection generated %d suggestion(s).", len(saved))
+
+    _auto_log_reflection(cfg, saved)
+
     return saved
+
+
+def _auto_log_reflection(cfg: "Config", saved: list[dict[str, Any]]) -> None:
+    """Silently append a brief reflection note to the Dev Log if Google OAuth is set up."""
+    if not (cfg.google_client_id or "").strip():
+        return
+    try:
+        import subprocess
+        import sys
+
+        branch = "unknown"
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                capture_output=True, text=True, timeout=3,
+            )
+            branch = result.stdout.strip() or "unknown"
+        except Exception:  # noqa: BLE001
+            pass
+
+        top_issue = saved[0]["title"] if saved else "none"
+        lines = [
+            f"Ran reflection: {len(saved)} suggestion(s) generated",
+            f"Top issue: {top_issue}",
+            f"Branch: {branch}",
+        ]
+        summary = "\n".join(lines)
+        default_author = "Jack's Claude"
+        author = f"{getattr(cfg, 'dev_log_author', default_author)} — auto"
+
+        from tools.dev_log import append_dev_log_entry
+        result = append_dev_log_entry(summary, author=author)
+        logger.debug("📓 Auto dev-log: %s", result)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Auto dev-log skipped: %s", exc)

@@ -84,6 +84,8 @@ _PERSISTED_FIELDS = (
     "vad_min_capture_ms",
     "github_repo",
     "github_branch",
+    "dev_log_doc_id",
+    "dev_log_author",
 )
 
 
@@ -148,6 +150,8 @@ class Config:
     vad_min_capture_ms: int = 2500
     github_repo: str = "jackputney/jarvis_scratch"
     github_branch: str = "main"
+    dev_log_doc_id: str = "18OUXDja6GbV99dB_sv2iGlsLJTCqg3AQ95kvQbazQyc"
+    dev_log_author: str = "Jack's Claude"
 
     anthropic_api_key: str = field(default="", repr=False)
     openai_api_key: str = field(default="", repr=False)
@@ -235,6 +239,8 @@ class Config:
             vad_min_capture_ms=data.get("vad_min_capture_ms", cls.vad_min_capture_ms),
             github_repo=data.get("github_repo", cls.github_repo),
             github_branch=data.get("github_branch", cls.github_branch),
+            dev_log_doc_id=data.get("dev_log_doc_id", cls.dev_log_doc_id),
+            dev_log_author=data.get("dev_log_author", cls.dev_log_author),
         )
 
         cfg.anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY", "")
