@@ -27,6 +27,30 @@
 
 ---
 
+### 2026-06-23 — GitHub write access — Jack
+
+[Agent: Cursor — acting for Jack — 2026-06-23]
+
+**Branch:** jack/sprint-6 | **Tests:** 439 passing
+
+**What changed:**
+
+- `tools/github_self.py` — five write tools: branch, file, PR, issue, comment
+- `tools/registry.py` — MODERATE/HIGH_RISK tiers; `DASHBOARD_CONFIRM_TOOLS` unchanged pattern
+- `improvement/reflect.py` — Accept opens branch + GitHub issue; stores `github_issue_url`
+- `memory/db.py` — `suggestions.github_issue_url` column
+- `improvement/trace.py` — `suggestion_github` write op
+- `dashboard/app.py` — accept endpoint returns issue URL
+- `tests/test_github_self.py` — write tool mocks + accept integration
+- `DOCS/FEATURE_DOCS/GITHUB_SELF.md` — read + write documentation
+- `costs.py` — daily tool/query counts use local midnight (fixes UTC `date('now') mismatch in tests)
+
+**Why:** Jarvis Thinks suggestions need a concrete handoff to GitHub so Jack/Oliver can pick them up in Cursor and close the loop.
+
+**Watch out for:** Write tools need PAT scopes beyond read-only. `create_own_file`/`create_own_pr` always require confirm. Dev Log Google Doc updated manually (no API access from repo).
+
+---
+
 ### 2026-06-23 — confirm gate KeyError fix + Oliver sprint-5 review — Jack
 
 [Agent: Cursor — acting for Jack — 2026-06-23]

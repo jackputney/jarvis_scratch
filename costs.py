@@ -130,19 +130,23 @@ def get_spend_summary(daily_budget: float, monthly_budget: float) -> dict:
 
 
 def get_daily_query_count() -> int:
-    """Count of conversation turns logged today."""
+    """Count of conversation turns logged today (local midnight boundary)."""
+    start = _period_start("today")
     with _connect() as conn:
         row = conn.execute(
-            "SELECT COUNT(*) FROM conversations WHERE date(timestamp) = date('now')"
+            "SELECT COUNT(*) FROM conversations WHERE timestamp >= ?",
+            (start,),
         ).fetchone()
     return int(row[0]) if row else 0
 
 
 def get_daily_tool_count() -> int:
-    """Count of tool runs logged today."""
+    """Count of tool runs logged today (local midnight boundary)."""
+    start = _period_start("today")
     with _connect() as conn:
         row = conn.execute(
-            "SELECT COUNT(*) FROM tool_runs WHERE date(timestamp) = date('now')"
+            "SELECT COUNT(*) FROM tool_runs WHERE timestamp >= ?",
+            (start,),
         ).fetchone()
     return int(row[0]) if row else 0
 

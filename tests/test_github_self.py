@@ -1,27 +1,44 @@
 """GitHub self-read tools and reflect integration."""
 
-from __future__ import annotations
-
 import base64
 import json
-from unittest.mock import MagicMock
 
 import pytest
 
+from dashboard.app import create_app
 from tools.github_self import (
+    comment_own_issue,
+    create_own_branch,
+    create_own_file,
+    create_own_issue,
+    create_own_pr,
     get_own_commits,
     list_own_files,
     read_own_file,
     resolve_tool_source_path,
     search_own_code,
 )
+from tools.registry import CONFIRM_REQUIRED_TOOLS, DASHBOARD_CONFIRM_TOOLS, MODERATE_TOOLS
+
+
+@pytest.fixture
+def client(temp_env):
+    from dashboard.tools_run_confirm import reset_for_tests as reset_tools_run_confirm
+
+    reset_tools_run_confirm()
+    app = create_app()
+    app.config.update(TESTING=True)
+    return app.test_client()
 
 
 def _mock_response(status_code: int, payload, text: str = ""):
+    from unittest.mock import MagicMock
+
     resp = MagicMock()
     resp.status_code = status_code
     resp.json.return_value = payload
     resp.text = text or json.dumps(payload)
+    resp.content = b"{}" if payload else b""
     return resp
 
 
@@ -231,3 +248,132 @@ def test_resolve_tool_source_path_tries_candidates(monkeypatch):
     assert path == "tools/web_search.py"
     assert "web_search" in content
     assert calls[0] == "tools/web_search.py"
+
+
+def test_create_own_branch_creates_ref(monkeypatch):
+    import requests
+
+    calls: list[tuple[str, str]] = []
+
+    def fake_request(method, url, **kwargs):
+        calls.append((method.upper(), url))
+        if method.upper() == "GET" and "/git/ref/heads/main" in url:
+            return _mock_response(200, {"object": {"sha": "abc123"}})
+        if method.upper() == "POST" and "/git/refs" in url:
+            assert kwargs["json"]["ref"] == "refs/heads/feature/test"
+            assert kwargs["json"]["sha"] == "abc123"
+            return _mock_response(201, {"ref": "refs/heads/feature/test"})
+        return _mock_response(500, {}, text="unexpected")
+
+    monkeypatch.setattr(requests, "request", fake_request)
+    result = create_own_branch("feature/test")
+    assert "feature/test" in result
+    assert any(m == "POST" for m, _ in calls)
+
+
+def test_create_own_pr_posts_payload(monkeypatch):
+    import requests
+
+    captured: dict = {}
+
+    def fake_request(method, url, **kwargs):
+        if method.upper() == "POST" and "/pulls" in url:
+            captured.update(kwargs.get("json") or {})
+            return _mock_response(201, {"html_url": "https://github.com/o/r/pull/1"})
+        return _mock_response(404, {}, text="not found")
+
+    monkeypatch.setattr(requests, "request", fake_request)
+    url = create_own_pr("Fix bug", "Details", "feature/x", "main")
+    assert url.endswith("/pull/1")
+    assert captured == {"title": "Fix bug", "body": "Details", "head": "feature/x", "base": "main"}
+
+
+def test_create_own_issue_posts_payload(monkeypatch):
+    import requests
+
+    captured: dict = {}
+
+    def fake_request(method, url, **kwargs):
+        if method.upper() == "POST" and url.endswith("/issues"):
+            captured.update(kwargs.get("json") or {})
+            return _mock_response(201, {"html_url": "https://github.com/o/r/issues/9"})
+        return _mock_response(404, {}, text="not found")
+
+    monkeypatch.setattr(requests, "request", fake_request)
+    url = create_own_issue("Bug", "Body text", labels=["jarvis"])
+    assert "/issues/9" in url
+    assert captured["title"] == "Bug"
+    assert captured["labels"] == ["jarvis"]
+
+
+def test_write_tools_missing_pat(monkeypatch):
+    monkeypatch.delenv("GITHUB_PAT", raising=False)
+    for fn, args in (
+        (create_own_branch, ("x",)),
+        (create_own_file, ("a.py", "x", "msg")),
+        (create_own_pr, ("t", "b", "head")),
+        (create_own_issue, ("t", "b")),
+        (comment_own_issue, (1, "hi")),
+    ):
+        result = fn(*args)
+        assert "GITHUB_PAT" in result
+
+
+def test_high_risk_github_self_tools_require_confirm():
+    assert "create_own_file" in CONFIRM_REQUIRED_TOOLS
+    assert "create_own_pr" in CONFIRM_REQUIRED_TOOLS
+    assert "create_own_branch" in MODERATE_TOOLS
+    assert "create_own_file" in DASHBOARD_CONFIRM_TOOLS
+
+
+def test_create_own_file_requires_dashboard_confirm(client):
+    r = client.post("/api/tools/run", json={
+        "name": "create_own_file",
+        "inputs": {"path": "notes/test.txt", "content": "hello", "message": "add test"},
+    })
+    body = r.get_json()
+    assert body.get("confirm_required") is True
+    assert body.get("confirm_id")
+
+
+def test_accept_suggestion_opens_github_issue(monkeypatch, temp_env):
+    from improvement.reflect import SuggestionDraft, accept_suggestion, fetch_suggestion_by_id, persist_suggestion
+    from improvement.trace import flush_writes, reset_writer_for_tests
+    from memory.db import init_db
+
+    reset_writer_for_tests()
+    init_db()
+    sid = persist_suggestion(
+        SuggestionDraft(
+            "Fix web_search",
+            "Errors too often",
+            "tools",
+            "high",
+            "Update tools/web.py line 2",
+            '{"tool": "web_search"}',
+        ),
+    )
+    flush_writes()
+
+    monkeypatch.setattr(
+        "tools.github_self.create_own_branch",
+        lambda name, from_branch="main": f"https://github.com/o/r/tree/{name}",
+    )
+    monkeypatch.setattr(
+        "tools.github_self.create_own_issue_url",
+        lambda title, body, labels=None: (
+            "https://github.com/o/r/issues/42",
+            None,
+        ),
+    )
+    monkeypatch.setattr(
+        "tools.github_self.read_own_file_content",
+        lambda path, **kw: ("def web_search(): pass", None),
+    )
+
+    result = accept_suggestion(sid)
+    flush_writes()
+    assert result["ok"] is True
+    assert result["github_issue_url"] == "https://github.com/o/r/issues/42"
+    stored = fetch_suggestion_by_id(sid)
+    assert stored["github_issue_url"] == "https://github.com/o/r/issues/42"

@@ -72,7 +72,7 @@ def fetch_suggestions(*, status: str = "pending", limit: int = 20) -> list[dict[
         rows = conn.execute(
             """
             SELECT id, created_at, title, body, category, severity, status,
-                   evidence_json, proposed_change
+                   evidence_json, proposed_change, github_issue_url
             FROM suggestions
             WHERE status = ?
             ORDER BY
@@ -89,7 +89,7 @@ def fetch_suggestions(*, status: str = "pending", limit: int = 20) -> list[dict[
         ).fetchall()
     cols = [
         "id", "created_at", "title", "body", "category", "severity", "status",
-        "evidence_json", "proposed_change",
+        "evidence_json", "proposed_change", "github_issue_url",
     ]
     out: list[dict[str, Any]] = []
     for row in rows:
@@ -101,6 +101,97 @@ def fetch_suggestions(*, status: str = "pending", limit: int = 20) -> list[dict[
             item.pop("evidence_json", None)
         out.append(item)
     return out
+
+
+def fetch_suggestion_by_id(suggestion_id: str) -> dict[str, Any] | None:
+    from memory.db import connect
+
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT id, created_at, title, body, category, severity, status,
+                   evidence_json, proposed_change, github_issue_url
+            FROM suggestions WHERE id = ?
+            """,
+            (suggestion_id,),
+        ).fetchone()
+    if not row:
+        return None
+    cols = [
+        "id", "created_at", "title", "body", "category", "severity", "status",
+        "evidence_json", "proposed_change", "github_issue_url",
+    ]
+    item = dict(zip(cols, row))
+    try:
+        item["evidence"] = json.loads(item.pop("evidence_json") or "{}")
+    except json.JSONDecodeError:
+        item["evidence"] = {}
+        item.pop("evidence_json", None)
+    return item
+
+
+def _store_github_issue_url(suggestion_id: str, url: str) -> None:
+    _enqueue("suggestion_github", url, suggestion_id)
+
+
+def _create_github_tracking_for_suggestion(suggestion: dict[str, Any]) -> dict[str, Any]:
+    from tools.github_self import (
+        create_own_branch,
+        create_own_issue_url,
+        extract_file_path_from_text,
+        read_own_file_content,
+    )
+
+    sid = str(suggestion.get("id") or "")
+    branch_name = f"jarvis/improvement/{sid}"
+    branch_result = create_own_branch(branch_name)
+    branch_url = branch_result if str(branch_result).startswith("http") else None
+
+    proposed = str(suggestion.get("proposed_change") or "")
+    file_path = extract_file_path_from_text(proposed)
+    if not file_path:
+        file_path = extract_file_path_from_text(json.dumps(suggestion.get("evidence") or {}, default=str))
+
+    file_snippet = ""
+    if file_path:
+        content, err = read_own_file_content(file_path)
+        if content and not err:
+            file_snippet = f"\n\n## Current file ({file_path})\n```\n{content[:4000]}\n```"
+
+    issue_title = f"[Jarvis Suggests] {suggestion.get('title', 'Improvement')}"
+    issue_body = (
+        f"{suggestion.get('body', '')}\n\n"
+        f"## Proposed change\n{proposed}\n\n"
+        f"## Evidence\n```json\n{json.dumps(suggestion.get('evidence') or {}, indent=2, default=str)[:4000]}\n```"
+        f"{file_snippet}\n\n---\nSuggestion ID: `{sid}`"
+    )
+    if branch_url:
+        issue_body += f"\nBranch: {branch_url}"
+
+    url, err = create_own_issue_url(issue_title, issue_body, labels=["jarvis-suggests"])
+    if url:
+        _store_github_issue_url(sid, url)
+        flush_writes()
+        return {"ok": True, "github_issue_url": url, "branch_url": branch_url}
+
+    logger.warning("⚠️  GitHub issue not created for suggestion %s: %s", sid, err)
+    flush_writes()
+    return {"ok": True, "github_issue_url": None, "error": err, "branch_url": branch_url}
+
+
+def accept_suggestion(suggestion_id: str) -> dict[str, Any]:
+    """Mark accepted and open a GitHub tracking issue + branch."""
+    suggestion = fetch_suggestion_by_id(suggestion_id)
+    if suggestion is None:
+        return {"ok": False, "error": "not found"}
+    if suggestion.get("status") == "accepted" and suggestion.get("github_issue_url"):
+        return {"ok": True, "github_issue_url": suggestion["github_issue_url"]}
+    if not update_suggestion_status(suggestion_id, "accepted"):
+        return {"ok": False, "error": "not found"}
+    suggestion["status"] = "accepted"
+    result = _create_github_tracking_for_suggestion(suggestion)
+    result.setdefault("ok", True)
+    return result
 
 
 def update_suggestion_status(suggestion_id: str, status: str) -> bool:

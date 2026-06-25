@@ -50,6 +50,11 @@ from memory.semantic import remember as remember_fact, search as search_memory_i
 from memory.variables import get_variable, set_variable
 from tools.github import create_github_comment, get_github_repo_summary, search_github_issues
 from tools.github_self import (
+    comment_own_issue,
+    create_own_branch,
+    create_own_file,
+    create_own_issue,
+    create_own_pr,
     get_own_commits,
     get_own_issues,
     list_own_files,
@@ -804,6 +809,75 @@ TOOL_DEFINITIONS: list[dict] = [
             "required": [],
         },
     },
+    {
+        "name": "create_own_branch",
+        "description": "Create a new branch in Jarvis's own GitHub repo.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "branch_name": {"type": "string", "description": "New branch name."},
+                "from_branch": {"type": "string", "description": "Base branch (default main)."},
+            },
+            "required": ["branch_name"],
+        },
+    },
+    {
+        "name": "create_own_file",
+        "description": "Create or update a file in Jarvis's own GitHub repo. Requires confirmation.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Repo-relative file path."},
+                "content": {"type": "string", "description": "Full file contents."},
+                "message": {"type": "string", "description": "Commit message."},
+                "branch": {"type": "string", "description": "Target branch (default main)."},
+            },
+            "required": ["path", "content", "message"],
+        },
+    },
+    {
+        "name": "create_own_pr",
+        "description": "Open a pull request on Jarvis's own GitHub repo. Requires confirmation.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "PR title."},
+                "body": {"type": "string", "description": "PR description."},
+                "head": {"type": "string", "description": "Head branch with changes."},
+                "base": {"type": "string", "description": "Base branch (default main)."},
+            },
+            "required": ["title", "body", "head"],
+        },
+    },
+    {
+        "name": "create_own_issue",
+        "description": "Create a GitHub issue on Jarvis's own repo.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Issue title."},
+                "body": {"type": "string", "description": "Issue body."},
+                "labels": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional label names.",
+                },
+            },
+            "required": ["title", "body"],
+        },
+    },
+    {
+        "name": "comment_own_issue",
+        "description": "Post a comment on an issue in Jarvis's own GitHub repo.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "issue_number": {"type": "integer", "description": "Issue number."},
+                "body": {"type": "string", "description": "Comment text."},
+            },
+            "required": ["issue_number", "body"],
+        },
+    },
 ]
 
 # ---------------------------------------------------------------------------
@@ -888,6 +962,19 @@ TOOL_DISPATCH: dict[str, callable] = {
     "search_own_code": lambda **kw: search_own_code(kw["query"]),
     "get_own_commits": lambda **kw: get_own_commits(int(kw.get("limit") or 10)),
     "get_own_issues": lambda **kw: get_own_issues(kw.get("state", "open")),
+    "create_own_branch": lambda **kw: create_own_branch(
+        kw["branch_name"], kw.get("from_branch", "main"),
+    ),
+    "create_own_file": lambda **kw: create_own_file(
+        kw["path"], kw["content"], kw["message"], kw.get("branch", "main"),
+    ),
+    "create_own_pr": lambda **kw: create_own_pr(
+        kw["title"], kw.get("body", ""), kw["head"], kw.get("base", "main"),
+    ),
+    "create_own_issue": lambda **kw: create_own_issue(
+        kw["title"], kw.get("body", ""), kw.get("labels") or [],
+    ),
+    "comment_own_issue": lambda **kw: comment_own_issue(int(kw["issue_number"]), kw["body"]),
 }
 
 # Read-only tools — never confirm.
@@ -957,6 +1044,9 @@ MODERATE_TOOLS = frozenset({
     "music_set_volume",
     "get_now_playing",
     "search_and_play",
+    "create_own_branch",
+    "create_own_issue",
+    "comment_own_issue",
 })
 
 # High-risk mutating tools — dashboard confirm required when confirm_before_execute is on.
@@ -967,6 +1057,8 @@ CONFIRM_REQUIRED_TOOLS = frozenset({
     "send_slack_message",
     "create_github_comment",
     "create_pitch_deck",
+    "create_own_file",
+    "create_own_pr",
 })
 
 # Dashboard /api/tools/run two-step confirm. Includes voice auto-allow tools that

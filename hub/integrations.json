@@ -128,7 +128,7 @@
   {
     "id": "github_self",
     "name": "GitHub Self-Read",
-    "description": "Read Jarvis's own repo (jackputney/jarvis_scratch)",
+    "description": "Read and write Jarvis's own repo (jackputney/jarvis_scratch)",
     "icon": "ti-brand-github",
     "color": "gray",
     "auth_type": "api_key",

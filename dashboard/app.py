@@ -225,10 +225,10 @@ def create_app() -> Flask:
 
     @app.route("/api/improvement/suggestions/<suggestion_id>/accept", methods=["POST"])
     def api_improvement_suggestion_accept(suggestion_id: str):  # noqa: ANN202
-        from improvement.reflect import update_suggestion_status
+        from improvement.reflect import accept_suggestion
 
-        ok = update_suggestion_status(suggestion_id, "accepted")
-        return jsonify({"ok": ok}), (200 if ok else 404)
+        result = accept_suggestion(suggestion_id)
+        return jsonify(result), (200 if result.get("ok") else 404)
 
     @app.route("/api/improvement/suggestions/<suggestion_id>/dismiss", methods=["POST"])
     def api_improvement_suggestion_dismiss(suggestion_id: str):  # noqa: ANN202
