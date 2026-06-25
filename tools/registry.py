@@ -24,7 +24,7 @@ from tools.device_control import (
     set_volume,
     set_wifi,
 )
-from tools.download import download_file
+from tools.clipboard import read_clipboard, write_clipboard
 from tools.login_item import disable_login_item, enable_login_item, is_login_item_enabled, manage_startup
 from tools.media import (
     find_and_open_file,
@@ -334,6 +334,22 @@ TOOL_DEFINITIONS: list[dict] = [
         "name": "active_window",
         "description": "Get the title of the currently focused window (Windows).",
         "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "read_clipboard",
+        "description": "Read plain text from the system clipboard (Windows).",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "write_clipboard",
+        "description": "Write plain text to the system clipboard (Windows).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "Text to copy to the clipboard."},
+            },
+            "required": ["text"],
+        },
     },
     {
         "name": "find_file",
@@ -892,6 +908,8 @@ TOOL_DISPATCH: dict[str, callable] = {
     "system_info": lambda **kw: pc_system_info(),
     "list_processes": lambda **kw: list_processes(),
     "active_window": lambda **kw: active_window(),
+    "read_clipboard": lambda **kw: read_clipboard(),
+    "write_clipboard": lambda **kw: write_clipboard(kw["text"]),
     "find_file": lambda **kw: find_file(kw["query"], kw.get("file_type", "")),
     "find_and_open_file": lambda **kw: find_and_open_file(kw["query"], kw.get("file_type", "")),
     "open_photos": lambda **kw: open_photos(kw.get("query", "")),
@@ -978,6 +996,7 @@ READ_ONLY_TOOLS = frozenset({
     "system_info",
     "list_processes",
     "active_window",
+    "read_clipboard",
     "find_file",
     "get_recent_files",
     "open_downloads",
@@ -1019,6 +1038,7 @@ MODERATE_TOOLS = frozenset({
     "get_now_playing",
     "search_and_play",
     "media_control",
+    "write_clipboard",
 })
 
 # High-risk mutating tools — dashboard confirm required when confirm_before_execute is on.
