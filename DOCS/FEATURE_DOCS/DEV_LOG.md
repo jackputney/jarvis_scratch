@@ -91,7 +91,7 @@ rm memory/google_token.json
 The current shared dev log is:
 
 ```
-18OUXDja6GbV99dB_sv2iGlsLJTCqg3AQ95kvQbazQyc
+1lG9v7TgCN_oC9hXPi7cKeCjzpuTxSMbhrYGptPy3aj8
 ```
 
 This is the default value in `Config.dev_log_doc_id`. To use a different doc:

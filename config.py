@@ -150,7 +150,7 @@ class Config:
     vad_min_capture_ms: int = 2500
     github_repo: str = "jackputney/jarvis_scratch"
     github_branch: str = "main"
-    dev_log_doc_id: str = "18OUXDja6GbV99dB_sv2iGlsLJTCqg3AQ95kvQbazQyc"
+    dev_log_doc_id: str = "1lG9v7TgCN_oC9hXPi7cKeCjzpuTxSMbhrYGptPy3aj8"
     dev_log_author: str = "Jack's Claude"
 
     anthropic_api_key: str = field(default="", repr=False)

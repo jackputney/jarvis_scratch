@@ -34,7 +34,7 @@ logger = logging.getLogger("jarvis.tools.dev_log")
 
 _LOG_SECTION_MARKER = "## LOG"
 _ENTRY_SEPARATOR = "---"
-_DEFAULT_DOC_ID = "18OUXDja6GbV99dB_sv2iGlsLJTCqg3AQ95kvQbazQyc"
+_DEFAULT_DOC_ID = "1lG9v7TgCN_oC9hXPi7cKeCjzpuTxSMbhrYGptPy3aj8"
 _DEFAULT_AUTHOR = "Jack's Claude"
 
 
