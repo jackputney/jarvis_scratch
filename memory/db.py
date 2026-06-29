@@ -153,7 +153,50 @@ def init_db() -> None:
                 conn.commit()
             except Exception:  # noqa: BLE001
                 pass
+
+            _scrub_corrupt_telemetry(conn)
+
         _initialised = True
+
+
+def _scrub_corrupt_telemetry(conn: sqlite3.Connection) -> None:
+    """Remove known-corrupt rows created by instrumentation bugs.
+
+    Two classes of corrupt data are cleaned up here on startup:
+
+    1. Self-referential corrections (turn_id == prev_turn_id): caused by a
+       duplicate _apply_signal_detections() call in TurnTrace.__exit__ that
+       compared each turn against itself, generating a spurious asr_correction
+       for every single turn.  Fixed in improvement/trace.py (sprint-9).
+
+    2. Synthetic 'trace'/'slow' turns: injected by scripted benchmark runs
+       into the production DB, polluting correction_rate and latency metrics.
+       Their origin is unclear; they always appear in voice/dashboard pairs
+       at identical timestamps and are never real user utterances.
+    """
+    import logging as _logging
+
+    _log = _logging.getLogger("jarvis.db.scrub")
+
+    deleted_corrections = conn.execute(
+        "DELETE FROM corrections WHERE turn_id = prev_turn_id"
+    ).rowcount
+    conn.commit()
+    if deleted_corrections:
+        _log.info(
+            "🧹 Scrubbed %d self-referential correction rows (instrumentation bug fixed).",
+            deleted_corrections,
+        )
+
+    deleted_turns = conn.execute(
+        "DELETE FROM turns WHERE stt_text IN ('trace', 'slow')"
+    ).rowcount
+    conn.commit()
+    if deleted_turns:
+        _log.info(
+            "🧹 Scrubbed %d synthetic benchmark turns ('trace'/'slow') from production DB.",
+            deleted_turns,
+        )
 
 
 def enforce_retention(retention_days: int = 90) -> None:

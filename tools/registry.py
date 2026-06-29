@@ -1136,6 +1136,9 @@ AUTO_ALLOW_TOOLS = frozenset({
     "write_note",
     "remember",
     "escalate",
+    # send_email — intentionally AUTO_ALLOW for voice-first UX.
+    # Dashboard path still requires confirm modal (see DASHBOARD_CONFIRM_TOOLS).
+    # Risk accepted: misheard commands could send email. Documented design decision.
     "send_email",
 })
 

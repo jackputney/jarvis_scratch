@@ -110,9 +110,11 @@ All four items flagged during the initial audit pass were fixed in the same spri
 | Tier | Count | Tools |
 |------|-------|-------|
 | `READ_ONLY_TOOLS` | 35 | `get_current_time`, `web_search`, `get_weather`, calendar, email reads, sheets read, contacts, drive read, slack read, github reads, github_self reads, device info, clipboard read, file find, `check_for_updates` |
-| `AUTO_ALLOW_TOOLS` | 18 | `open_app`, volume/mute/brightness/DND/lock/appearance/screen-saver/wifi, media opens, `find_and_open_file`, `open_file`, `set_variable`, `write_note`, `remember`, `escalate`, `send_email` |
+| `AUTO_ALLOW_TOOLS` | 18 | `open_app`, volume/mute/brightness/DND/lock/appearance/screen-saver/wifi, media opens, `find_and_open_file`, `open_file`, `set_variable`, `write_note`, `remember`, `escalate`, `send_email`† |
 | `MODERATE_TOOLS` | 16 | Login items, music controls, `media_control`, `write_clipboard`, GitHub write (branch/issue/comment) |
 | `CONFIRM_REQUIRED_TOOLS` | 10 | `download_file`, sheets write, slack send, `create_github_comment`, `create_pitch_deck`, GitHub write (file/PR), `apply_update`, `restart_jarvis` |
+
+† `send_email` is `AUTO_ALLOW` for voice — **intentional design decision**. The dashboard path still requires a confirm modal via `DASHBOARD_CONFIRM_TOOLS`. Risk accepted: a misheard voice command could send email. Documented in `tools/registry.py`.
 
 ---
 

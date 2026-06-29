@@ -1,6 +1,6 @@
 # Windows Setup & Gotchas
 
-Hard-won notes for running Jarvis on Windows. Pairs with `docs/PLATFORM.md`
+Hard-won notes for running Jarvis on Windows. Pairs with `DOCS/PLATFORM.md`
 (one codebase, adapter layer). The single biggest lever is **the Python version**.
 
 ## Use Python 3.11 or 3.12 — not 3.14
@@ -50,7 +50,7 @@ Copy `.env.example` → `.env` and set at least `ANTHROPIC_API_KEY`. Optional:
   `cmd /c start shell:AppsFolder\{AppID}` — reliable for Spotify, Discord,
   Chrome, Edge, etc. First lookup for an uncommon app can take 1–2s.
   Music/Photos/Podcasts *control* is macOS-only; on Windows Jarvis can open
-  Spotify but not control playback yet (see `docs/PLATFORM.md` → `AppControl`
+  Spotify but not control playback yet (see `DOCS/PLATFORM.md` → `AppControl`
   adapter).
 - **Diary memory** — pre-fix refusals saved to `memory/diary/` are now filtered
   from recall (`memory/semantic.py`), but old entries still exist on disk; trim +
