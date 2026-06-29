@@ -258,3 +258,37 @@ Each phase ships as its own PR. Phase 1 must not break any existing tool, TTS, o
 | memory/SQLite | `TurnTrace` gains `session_id` column (nullable, backward-compatible migration) |
 | Self-improvement | `TurnTrace.session_id` enables per-session reflection in future; no change to current reflect.py |
 | Config | `conversation_idle_timeout_sec` reused as session idle timeout (no new config key) |
+
+---
+
+## Implementation notes — Phase 1 (Jack, 2026-06-29)
+
+**Status:** Implemented on `jack/sprint-9`. All new files are in `orchestrator/`.
+
+### Files shipped
+
+| File | Notes |
+|------|-------|
+| `orchestrator/session.py` | `LaneType`, `SessionState`, `Session`, `SessionStore` — matches spec exactly |
+| `orchestrator/lanes.py` | `VoiceLane`, `BackgroundLane`, `LaneManager` — matches spec exactly |
+| `orchestrator/types.py` | `Turn` dataclass added; `Job.session_id` field added |
+| `orchestrator/core.py` | Accepts optional `session_store`; emits `session_id` on events |
+| `orchestrator/runtime.py` | `get_session_store()`, `get_lane_manager()` singletons exposed |
+
+### Deviations from spec (none material)
+
+- `SessionStore` exposes `mark_idle(session_id)` and `mark_active(session_id)` helpers — pipeline.py will call these when the voice loop returns to wake-word detection. Not in spec but needed for Oliver's integration.
+- `BackgroundLane.submit()` in Phase 1 wraps a simple pass-through callable. Phase 2 will wire real LLM calls; the `speak_when_idle` plumbing is present but a noop until then.
+
+### Oliver's integration checklist (pipeline.py)
+
+1. After wake-word detect: call `voice_lane.submit(command)` — this handles session creation/continuation automatically.
+2. After Jarvis reply completes and pipeline returns to listening: call `session_store.mark_idle(session_id)`.
+3. On session timeout (follow-up window expires): call `session_store.close(session_id)`.
+4. Pass `session_id` (from `Job.session_id`) into `process_query()` so TurnTrace rows group by conversation.
+
+### Open questions — resolved
+
+1. **Follow-up timeout → close or keep-idle?** Resolved: keep IDLE through `conversation_idle_timeout_sec`. `VoiceLane.idle_timeout_sec = 600` (10 min). Close on timeout.
+2. **Barge-in + background lane?** Resolved: `request_interrupt()` cancels only the voice turn; `BackgroundLane.cancel_all()` is separate. Background jobs are never interrupted by barge-in.
+3. **Twilio audio lane?** Phase 3 item — `TelephonyLane(VoiceLane)` will swap audio I/O. Session model is identical.

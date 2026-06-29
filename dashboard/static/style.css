@@ -419,6 +419,54 @@ body::before {
   display: none;
 }
 
+/* ---- Sessions panel ---- */
+.sessions-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sessions-empty {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 8px 2px;
+}
+
+.session-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+  border: 1px solid var(--stroke);
+  font-size: 12px;
+}
+
+.session-lane {
+  padding: 2px 6px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.session-lane.voice { background: rgba(108, 123, 247, 0.15); color: var(--accent); }
+.session-lane.background { background: rgba(52, 199, 89, 0.15); color: #34c759; }
+
+.session-source { color: var(--text-muted); flex: 1; }
+
+.session-state { padding: 2px 6px; border-radius: 10px; font-size: 10px; font-weight: 600; }
+.state-active { background: rgba(52, 199, 89, 0.15); color: #34c759; }
+.state-idle   { background: rgba(255, 204, 0, 0.15); color: #ffcc00; }
+.state-closed { background: rgba(180, 180, 180, 0.15); color: var(--text-muted); }
+
+.session-turns, .session-age { color: var(--text-muted); white-space: nowrap; }
+
 /* ---- Activity feed ---- */
 .feed {
   display: flex;

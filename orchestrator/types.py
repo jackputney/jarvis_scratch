@@ -69,6 +69,22 @@ class Job:
     latency_ms: int = 0
     cost: float = 0.0
     done_event: threading.Event = field(default_factory=threading.Event)
+    session_id: str | None = None
 
     def wait(self, timeout: float | None = None) -> bool:
         return self.done_event.wait(timeout=timeout)
+
+
+@dataclass
+class Turn:
+    """A single request–response pair within a Session."""
+
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    session_id: str = ""
+    command: Command | None = None
+    reply: str = ""
+    tools_used: list[str] = field(default_factory=list)
+    model: str = ""
+    latency_ms: int = 0
+    cost: float = 0.0
+    trace_id: str = ""  # links to TurnTrace.turn_id in SQLite

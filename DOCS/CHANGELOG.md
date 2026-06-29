@@ -27,6 +27,31 @@
 
 ---
 
+### 2026-06-29 — Session + Lane architecture — Sprint 9 Phase 1 — Jack
+[Agent: Claude Sonnet 4.6 — acting for Jack — 2026-06-29]
+
+**Branch:** `jack/sprint-9` | **Tests:** 564 passing
+
+**What changed:**
+- `orchestrator/session.py` (NEW) — `Session` dataclass, `SessionStore`, `LaneType`, `SessionState`; in-memory thread-safe registry of open conversations
+- `orchestrator/lanes.py` (NEW) — `VoiceLane` (wraps Orchestrator, session-aware submit, idle-continue), `BackgroundLane` (thread-pool concurrent tasks), `LaneManager` (routing decisions)
+- `orchestrator/types.py` — added `Turn` dataclass (request/response pair within a session); added `session_id` field to `Job`
+- `orchestrator/core.py` — accepts optional `session_store`; emits `session_id` on `job.transcript` and `pipeline.state` events; prefers orchestrator session_id over process-level TurnTrace session_id
+- `orchestrator/runtime.py` — exposes `get_session_store()` and `get_lane_manager()` singletons; `reset_for_tests()` tears down lanes cleanly
+- `dashboard/app.py` — `GET /api/sessions` and `GET /api/sessions/<id>` endpoints
+- `dashboard/templates/index.html` — Sessions panel in Overview grid, active session count metric card
+- `dashboard/static/app.js` — `loadSessions()` function, polls every 10s
+- `dashboard/static/style.css` — session card and badge styles
+- `improvement/trace.py` — `set_eval_mode()` guard + `reset_writer_for_tests()` clears it; `_apply_signal_detections` duplicate call removed (fixes 98.25% correction_rate bug)
+- `tests/test_session.py` (NEW) — 21 tests covering Session lifecycle, SessionStore, thread safety
+- `tests/test_lanes.py` (NEW) — 13 tests covering VoiceLane, BackgroundLane, LaneManager
+
+**Why:** Conversations are now first-class objects. The voice lane continues an idle session on barge-in; background tasks run concurrently without blocking voice. TurnTrace rows group correctly by conversation. Fixes the instrumentation bug that inflated correction_rate to 98%.
+
+**Watch out for:** Oliver's `pipeline.py` integration (Phase 2) should use `voice_lane.submit()` instead of `orchestrator.submit()` directly and pass the returned `session_id` into `process_query()`. Stable signatures are in `sessions.spec.md`. Also: run `DELETE FROM corrections WHERE turn_id = prev_turn_id;` against the production DB to purge the ~62 self-referential correction records from before this fix.
+
+---
+
 ### 2026-06-25 — resolve 4 flagged audit items + sessions.spec.md — Jack
 
 [Agent: Cursor — acting for Jack — 2026-06-25]

@@ -20,9 +20,16 @@ from memory.db import connect
 logger = logging.getLogger("jarvis.improvement.trace")
 
 APP_VERSION = "dev"
+_eval_mode: bool = False
 _write_queue: queue.Queue[tuple[str, tuple[Any, ...]] | None] = queue.Queue()
 _writer_thread: threading.Thread | None = None
 _writer_lock = threading.Lock()
+
+
+def set_eval_mode(enabled: bool) -> None:
+    """Suppress all TurnTrace writes during eval runs to keep production DB clean."""
+    global _eval_mode
+    _eval_mode = enabled
 
 _session_id: str | None = None
 _session_lock = threading.Lock()
@@ -123,6 +130,8 @@ def _ensure_writer() -> None:
 
 
 def _enqueue(op: str, *args: Any) -> None:
+    if _eval_mode:
+        return
     _ensure_writer()
     _write_queue.put((op, args))
 
@@ -150,11 +159,12 @@ def flush_writes(timeout: float = 2.0) -> None:
 
 def reset_writer_for_tests() -> None:
     """Restart writer thread against a fresh test DB."""
-    global _writer_thread, _write_queue, _session_id
+    global _writer_thread, _write_queue, _session_id, _eval_mode
     shutdown_writer()
     _write_queue = queue.Queue()
     _writer_thread = None
     _session_id = None
+    _eval_mode = False
     with _stt_stash_lock:
         _stt_stash.clear()
     _session_last_turn.clear()
@@ -341,7 +351,6 @@ class TurnTrace:
                 {"type": type(exc).__name__, "message": str(exc)[:500]},
             )
 
-        self._apply_signal_detections()
         return False
 
     def queue_event(self, event_type: str, payload: dict[str, Any] | None = None) -> None:

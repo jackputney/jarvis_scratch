@@ -34,11 +34,13 @@ def _load_golden() -> list[dict]:
 def run_evals(*, dry_run: bool = False, use_haiku: bool = False) -> dict:
     from config import Config
     from improvement.judge import judge_turn
+    from improvement.trace import set_eval_mode
 
     cases = _load_golden()
     results: list[dict] = []
     tools_called: list[str] = []
 
+    set_eval_mode(True)
     if not dry_run:
         import pipeline
         from tools import registry
@@ -87,6 +89,7 @@ def run_evals(*, dry_run: bool = False, use_haiku: bool = False) -> dict:
             **verdict,
         })
 
+    set_eval_mode(False)
     passed = sum(1 for r in results if r.get("pass"))
     report = {
         "date": date.today().isoformat(),
