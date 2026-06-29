@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import json
 
-from twilio_server import build_twiml_response, clear_caller_audio, mark_audio, send_audio_to_caller
+from twilio_server import (
+    build_twiml_response,
+    clear_caller_audio,
+    mark_audio,
+    resolve_media_ws_url,
+    send_audio_to_caller,
+)
 
 
 class TestBuildTwiml:
@@ -84,3 +90,25 @@ class TestTwimlRoute:
         from twilio_server import _get_twiml_route
         bp = _get_twiml_route()
         assert bp.name == "twilio"
+
+
+class TestMediaWsUrl:
+    def test_explicit_env_override(self, monkeypatch):
+        import twilio_server
+
+        monkeypatch.setattr(
+            twilio_server,
+            "_env_value",
+            lambda key: "wss://tunnel.example/ws" if key == "TWILIO_MEDIA_WS_URL" else "",
+        )
+        assert resolve_media_ws_url("ignored:7777", secure=False) == "wss://tunnel.example/ws"
+
+    def test_derived_from_host_and_port(self, monkeypatch):
+        import twilio_server
+
+        monkeypatch.setattr(
+            twilio_server,
+            "_env_value",
+            lambda key: "8765" if key == "TWILIO_WS_PORT" else "",
+        )
+        assert resolve_media_ws_url("myhost.ngrok.io", secure=True) == "wss://myhost.ngrok.io:8765"

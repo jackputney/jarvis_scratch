@@ -167,6 +167,18 @@ def _start_dashboard() -> None:
     threading.Thread(target=run_dashboard, daemon=True, name="jarvis-dashboard").start()
 
 
+def _start_twilio() -> None:
+    """Start Twilio Media Streams WebSocket server when credentials are set."""
+    try:
+        from twilio_server import start_twilio_services, twilio_configured
+
+        if twilio_configured():
+            start_twilio_services()
+            print("   📞 Twilio         : Media Streams on port 8765 · POST /twilio/voice")
+    except Exception as exc:  # noqa: BLE001
+        print(f"⚠️  Twilio phone agent unavailable ({exc}).")
+
+
 def _start_dashboard_window(cfg: Config) -> None:
     """Open the Flask dashboard in a native PyWebView window (macOS/Windows)."""
     if not cfg.dashboard_native_window:
@@ -431,6 +443,7 @@ def main() -> None:
     _prepare_google(cfg)
     _prepare_wake_word(cfg)
     _start_dashboard()
+    _start_twilio()
     _print_banner(cfg)
 
     if cfg.ui_enabled:

@@ -42,6 +42,12 @@ def _twilio(method: str, path: str, **kwargs) -> tuple[str | None, dict]:
         return f"Call error: {exc}", {}
 
 
+def set_active_call_sid(call_sid: str) -> None:
+    """Track the active Media Stream call for tool hangup/status."""
+    global _active_call_sid
+    _active_call_sid = (call_sid or "").strip()
+
+
 def _resolve_sid(call_sid: str) -> str:
     return (call_sid or "").strip() or _active_call_sid
 

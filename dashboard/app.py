@@ -73,6 +73,17 @@ def _static_version() -> str:
     except OSError:
         return "1"
 
+
+def _register_twilio_routes(app: Flask) -> None:
+    """Mount TwiML webhook when Twilio credentials are configured."""
+    try:
+        from twilio_server import twilio_configured, _get_twiml_route
+
+        if twilio_configured():
+            app.register_blueprint(_get_twiml_route())
+    except Exception:  # noqa: BLE001
+        logger.warning("Twilio routes unavailable", exc_info=True)
+
 # -- Server-Sent Events fan-out ---------------------------------------------
 # The orchestrator emits job/state events on the shared bus; we mirror them to
 # every connected browser so the UI updates instantly instead of polling hard.
@@ -152,6 +163,7 @@ def create_app() -> Flask:
     app.config["JSON_SORT_KEYS"] = False
     _ensure_bus_subscription()
     app.register_blueprint(hub_bp)
+    _register_twilio_routes(app)
 
     # -- Page ---------------------------------------------------------------
     @app.route("/")
