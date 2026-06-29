@@ -252,6 +252,41 @@ def create_app() -> Flask:
             return jsonify({"ok": False, "error": err, "issues": []})
         return jsonify({"ok": True, "issues": issues})
 
+    # -- Sessions ----------------------------------------------------------
+    @app.route("/api/sessions")
+    def api_sessions():  # noqa: ANN202
+        from orchestrator.runtime import get_session_store
+        store = get_session_store()
+        sessions = [s.to_dict() for s in store.all_active()]
+        voice = [s for s in sessions if s["lane"] == "voice"]
+        background = [s for s in sessions if s["lane"] == "background"]
+        return jsonify({
+            "ok": True,
+            "sessions": sessions,
+            "voice_count": len(voice),
+            "background_count": len(background),
+        })
+
+    @app.route("/api/sessions/<session_id>")
+    def api_session_detail(session_id: str):  # noqa: ANN202
+        from orchestrator.runtime import get_session_store
+        store = get_session_store()
+        session = store.get(session_id)
+        if session is None:
+            return jsonify({"ok": False, "error": "Session not found"}), 404
+        detail = session.to_dict()
+        detail["turns"] = [
+            {
+                "id": t.id,
+                "reply": t.reply[:200],
+                "tools_used": t.tools_used,
+                "model": t.model,
+                "latency_ms": t.latency_ms,
+            }
+            for t in session.turns
+        ]
+        return jsonify({"ok": True, "session": detail})
+
     # -- Real-time event stream (SSE) --------------------------------------
     @app.route("/api/events")
     def api_events():  # noqa: ANN202

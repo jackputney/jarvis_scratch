@@ -680,6 +680,38 @@ $("calendar-prev")?.addEventListener("click", () => loadCalendarView(shiftIsoDat
 $("calendar-next")?.addEventListener("click", () => loadCalendarView(shiftIsoDate(_calendarDay || todayIsoDate(), 1)));
 $("calendar-today")?.addEventListener("click", () => loadCalendarView(todayIsoDate()));
 
+async function loadSessions() {
+  const list = $("sessions-list");
+  const summary = $("sessions-summary");
+  const metric = $("metric-sessions");
+  if (!list) return;
+  try {
+    const data = await getJSON("/api/sessions");
+    const sessions = data.sessions || [];
+    if (metric) metric.textContent = String(sessions.length);
+    if (summary) summary.innerHTML = `voice: ${data.voice_count ?? 0} &nbsp;·&nbsp; background: ${data.background_count ?? 0}`;
+    list.innerHTML = "";
+    if (!sessions.length) {
+      list.innerHTML = "<li class='sessions-empty'>No active sessions</li>";
+      return;
+    }
+    sessions.forEach((s) => {
+      const li = document.createElement("li");
+      li.className = "session-card";
+      const stateClass = s.state === "active" ? "state-active" : s.state === "idle" ? "state-idle" : "state-closed";
+      li.innerHTML =
+        `<span class="session-lane ${s.lane}">${esc(s.lane)}</span>` +
+        `<span class="session-source">${esc(s.source)}</span>` +
+        `<span class="session-state ${stateClass}">${esc(s.state)}</span>` +
+        `<span class="session-turns">${s.turn_count} turn${s.turn_count !== 1 ? "s" : ""}</span>` +
+        `<span class="session-age">${Math.round(s.age_sec)}s</span>`;
+      list.appendChild(li);
+    });
+  } catch {
+    /* transient */
+  }
+}
+
 async function loadOverviewPlugins() {
   const list = $("overview-plugins-list");
   if (!list) return;
@@ -1840,7 +1872,8 @@ document.addEventListener("keydown", (e) => {
 (async function init() {
   ensureActivityEmpty();
   await loadConfig();
-  await Promise.all([loadVars(), loadNotes(), loadMemoryInfo(), loadMetrics(), loadOverviewPlugins(), loadDevicePanel(), loadMusicPanel(), refresh()]);
+  await Promise.all([loadVars(), loadNotes(), loadMemoryInfo(), loadMetrics(), loadOverviewPlugins(), loadDevicePanel(), loadMusicPanel(), loadSessions(), refresh()]);
+  setInterval(loadSessions, 10000);
   connectEvents();
   setInterval(refreshActivityTimestamps, 30000);
 })();

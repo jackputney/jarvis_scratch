@@ -861,6 +861,7 @@ def process_query(
     on_state: Callable[[str], None] | None = None,
     speak: bool = False,
     on_sentence: Callable[[str], None] | None = None,
+    session_id: str | None = None,
 ) -> dict:
     if not _query_lock.acquire(blocking=False):
         logger.warning("⏳ Query rejected — another request is in flight.")
@@ -898,16 +899,50 @@ def process_query(
             on_sentence(warning)
 
         t0 = time.time()
-        history = conversation.build_messages(
-            cfg.conversation_history_turns,
-            cfg.conversation_history_max_chars,
-        )
+        if session_id:
+            from orchestrator.runtime import get_session_store
+            from orchestrator.types import Command, Turn
+
+            session = get_session_store().get(session_id)
+            if session is not None:
+                history = conversation.build_messages_from_session_turns(
+                    session.turns,
+                    cfg.conversation_history_turns,
+                    cfg.conversation_history_max_chars,
+                )
+            else:
+                history = conversation.build_messages(
+                    cfg.conversation_history_turns,
+                    cfg.conversation_history_max_chars,
+                )
+        else:
+            history = conversation.build_messages(
+                cfg.conversation_history_turns,
+                cfg.conversation_history_max_chars,
+            )
         reply, model, cost, stream_spoken = _call_claude(
             text, cfg, history=history, on_state=on_state, on_sentence=on_sentence,
         )
         latency_ms = int((time.time() - t0) * 1000)
         if _should_store_in_history(reply):
-            conversation.add_turn(text, reply)
+            if session_id:
+                from orchestrator.runtime import get_session_store
+                from orchestrator.types import Command, Turn
+
+                session = get_session_store().get(session_id)
+                if session is not None:
+                    session.add_turn(
+                        Turn(
+                            session_id=session_id,
+                            command=Command(text=text, source=session.source, speak=False),
+                            reply=(reply or "").strip(),
+                            model=model or "",
+                            latency_ms=latency_ms,
+                            cost=cost,
+                        )
+                    )
+            else:
+                conversation.add_turn(text, reply)
             record_exchange(text, reply, cfg)
         cleaned_reply = (reply or "").strip()
         if cleaned_reply:
@@ -1001,10 +1036,13 @@ def run_pipeline(
         events.set_pipeline_state(name)
         _sync_detection_pause(name, paused)
 
-    from orchestrator.runtime import get_orchestrator
+    from orchestrator.runtime import get_lane_manager, get_orchestrator, get_session_store
     from orchestrator.types import Command, CommandSource
 
     orchestrator = get_orchestrator()
+    lane_manager = get_lane_manager()
+    voice_lane = lane_manager.voice
+    session_store = get_session_store()
 
     last_budget_level = ""
 
@@ -1062,6 +1100,11 @@ def run_pipeline(
                 if is_muted is not None:
                     events.set_muted(is_muted())
                 push_budget_level(cfg)
+                idle_timeout = max(
+                    2, int(getattr(cfg, "conversation_idle_timeout_sec", 20) or 20)
+                )
+                voice_lane.idle_timeout_sec = float(idle_timeout)
+                session_store.close_idle(older_than_sec=idle_timeout)
                 set_state("IDLE")
 
                 if not cfg.wake_word_enabled:
@@ -1097,16 +1140,24 @@ def run_pipeline(
                 if text is None:
                     continue
 
-                # Process the wake-triggered query, then keep listening for
-                # follow-ups without repeating the wake word.
+                if _is_end_phrase(text):
+                    active = voice_lane.active_session()
+                    if active is not None:
+                        session_store.close(active.id)
+                    speak("Okay.")
+                    set_state("IDLE")
+                    continue
+
+                # Process the wake-triggered query, then keep the session open
+                # for follow-ups via the next wake word (or idle timeout).
                 while text is not None:
                     if _interrupt.is_set():
                         logger.info("⏹️  Cycle aborted.")
                         set_state("IDLE")
                         break
 
-                    sub = orchestrator.submit(
-                        Command(text=text, source=CommandSource.VOICE, speak=True)
+                    sub = voice_lane.submit(
+                        Command(text=text, source=CommandSource.VOICE, speak=True),
                     )
                     if not sub.accepted:
                         logger.warning("⏳ Queue full — voice command rejected.")
@@ -1122,6 +1173,8 @@ def run_pipeline(
                     if job is not None and job.reply:
                         logger.info("💬 Reply: %s", job.reply)
 
+                    voice_session_id = job.session_id if job is not None else None
+
                     if barged:
                         _clear_interrupt()
                         wake_event.clear()
@@ -1130,11 +1183,6 @@ def run_pipeline(
                             capture_queue, capturing, paused, cfg, set_state,
                             skip_drain=True,
                         )
-                        if text is None:
-                            text = _await_followup_utterance(
-                                capture_queue, capturing, paused, cfg, set_state, wake_event,
-                                last_reply=job.reply if job else None,
-                            )
                         if text is None:
                             break
                         continue
@@ -1145,14 +1193,13 @@ def run_pipeline(
                         break
 
                     if job is not None and job.capped:
+                        if voice_session_id:
+                            session_store.close(voice_session_id)
                         break
 
-                    text = _await_followup_utterance(
-                        capture_queue, capturing, paused, cfg, set_state, wake_event,
-                        last_reply=job.reply if job else None,
-                    )
-                    if text is None:
-                        break
+                    if voice_session_id:
+                        session_store.mark_idle(voice_session_id)
+                    break
 
             except Exception as exc:  # noqa: BLE001
                 logger.error("⚠️  Pipeline cycle failed: %s", exc, exc_info=True)

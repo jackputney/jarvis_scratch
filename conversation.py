@@ -29,13 +29,13 @@ def add_turn(user_text: str, assistant_text: str) -> None:
         _turns.append((user_text, assistant_text))
 
 
-def build_messages(max_turns: int, max_chars: int) -> list[dict[str, Any]]:
-    """Return prior turns as Anthropic messages (excludes the current user utterance)."""
+def _pairs_to_messages(
+    pairs: list[tuple[str, str]],
+    max_turns: int,
+    max_chars: int,
+) -> list[dict[str, Any]]:
     max_turns = max(0, int(max_turns))
     max_chars = max(500, int(max_chars))
-    with _lock:
-        pairs = list(_turns)
-
     if max_turns == 0 or not pairs:
         return []
 
@@ -53,3 +53,27 @@ def build_messages(max_turns: int, max_chars: int) -> list[dict[str, Any]]:
         messages.append({"role": "user", "content": user_text})
         messages.append({"role": "assistant", "content": assistant_text})
     return messages
+
+
+def build_messages(max_turns: int, max_chars: int) -> list[dict[str, Any]]:
+    """Return prior turns as Anthropic messages (excludes the current user utterance)."""
+    with _lock:
+        pairs = list(_turns)
+    return _pairs_to_messages(pairs, max_turns, max_chars)
+
+
+def build_messages_from_session_turns(
+    turns: list[Any],
+    max_turns: int,
+    max_chars: int,
+) -> list[dict[str, Any]]:
+    """Build Anthropic messages from orchestrator Session.turns."""
+    pairs: list[tuple[str, str]] = []
+    for turn in turns:
+        user_text = ""
+        if turn.command is not None:
+            user_text = (turn.command.text or "").strip()
+        assistant_text = (turn.reply or "").strip()
+        if user_text or assistant_text:
+            pairs.append((user_text, assistant_text))
+    return _pairs_to_messages(pairs, max_turns, max_chars)

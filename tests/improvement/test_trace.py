@@ -16,6 +16,7 @@ from improvement.trace import (
     flush_writes,
     record_tool_call,
     reset_writer_for_tests,
+    set_eval_mode,
 )
 from memory.db import connect, init_db
 
@@ -81,6 +82,75 @@ def test_record_tool_call_error_writes_tool_error_event():
             "SELECT type FROM events WHERE turn_id = ?", (tid,)
         ).fetchone()
     assert row[0] == "tool_error"
+
+
+def _correction_rows(turn_id: str | None = None) -> list[dict]:
+    with connect() as conn:
+        conn.row_factory = sqlite3.Row
+        if turn_id:
+            rows = conn.execute(
+                "SELECT * FROM corrections WHERE turn_id = ?", (turn_id,)
+            ).fetchall()
+        else:
+            rows = conn.execute("SELECT * FROM corrections").fetchall()
+    return [dict(r) for r in rows]
+
+
+def test_single_turn_generates_no_corrections():
+    """One turn in a session should not produce any correction record."""
+    sid = ensure_session()
+    tid = str(uuid.uuid4())
+    with TurnTrace(session_id=sid, source="voice", turn_id=tid) as t:
+        t.stt_text = "what time is it"
+    flush_writes()
+    assert _correction_rows(tid) == [], "single turn must not self-correct"
+
+
+def test_second_turn_same_text_generates_exactly_one_correction():
+    """Repeating the same text in consecutive turns is one asr_correction — not two."""
+    sid = str(uuid.uuid4())
+    tid1 = str(uuid.uuid4())
+    tid2 = str(uuid.uuid4())
+    with TurnTrace(session_id=sid, source="voice", turn_id=tid1) as t:
+        t.stt_text = "trace"
+    flush_writes()
+    with TurnTrace(session_id=sid, source="voice", turn_id=tid2) as t:
+        t.stt_text = "trace"
+    flush_writes()
+    rows = _correction_rows(tid2)
+    assert len(rows) == 1, f"expected 1 correction, got {len(rows)}: {rows}"
+    assert rows[0]["prev_turn_id"] == tid1, "prev_turn_id must point to the previous turn"
+    assert rows[0]["turn_id"] != rows[0]["prev_turn_id"], "turn must not self-reference"
+
+
+def test_no_self_referential_corrections_across_session():
+    """No correction record should ever have turn_id == prev_turn_id."""
+    sid = str(uuid.uuid4())
+    texts = ["open spotify", "open spotify", "what time is it", "open spotify"]
+    for text in texts:
+        with TurnTrace(session_id=sid, source="voice") as t:
+            t.stt_text = text
+    flush_writes()
+    self_refs = [
+        r for r in _correction_rows()
+        if r["turn_id"] == r["prev_turn_id"]
+    ]
+    assert self_refs == [], f"self-referential corrections found: {self_refs}"
+
+
+def test_eval_mode_suppresses_turn_writes():
+    """Turns recorded inside eval mode must not appear in the production DB."""
+    sid = str(uuid.uuid4())
+    tid = str(uuid.uuid4())
+    set_eval_mode(True)
+    try:
+        with TurnTrace(session_id=sid, source="voice", turn_id=tid) as t:
+            t.stt_text = "trace"
+        flush_writes()
+    finally:
+        set_eval_mode(False)
+    assert _turn_row(tid) is None, "eval-mode turn must not be written to DB"
+    assert _correction_rows(tid) == [], "eval-mode must not write corrections"
 
 
 def test_concurrent_turn_trace_writes_without_busy():

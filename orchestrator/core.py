@@ -21,11 +21,13 @@ import logging
 import queue
 import threading
 import time
+import inspect
 from collections import deque
 from collections.abc import Callable
 from typing import Any
 
 from orchestrator.events import EventBus
+from orchestrator.session import SessionStore
 from orchestrator.types import Command, CommandSource, Job, JobState, SubmitResult
 
 logger = logging.getLogger("jarvis.orchestrator")
@@ -49,6 +51,7 @@ class Orchestrator:
         interrupt_event: threading.Event | None = None,
         request_interrupt: Callable[[], None] | None = None,
         clear_interrupt: Callable[[], None] | None = None,
+        session_store: SessionStore | None = None,
     ) -> None:
         self._bus = bus
         self._process_query = process_query
@@ -60,6 +63,7 @@ class Orchestrator:
         self._interrupt_event = interrupt_event
         self._request_interrupt = request_interrupt
         self._clear_interrupt = clear_interrupt
+        self._session_store = session_store
 
         self._cv = threading.Condition()
         self._queue: deque[Command] = deque()
@@ -161,6 +165,19 @@ class Orchestrator:
                     with self._cv:
                         self._current_job_id = None
 
+    def _call_process_query(
+        self,
+        text: str,
+        cfg: Any,
+        session_id: str | None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Call process_query, passing session_id only if the handler accepts it."""
+        params = inspect.signature(self._process_query).parameters
+        if session_id is not None and "session_id" in params:
+            return self._process_query(text, cfg, session_id=session_id, **kwargs)
+        return self._process_query(text, cfg, **kwargs)
+
     def _run_one(self, command: Command) -> Job:
         job = self._jobs[command.id]
         self._do_clear_interrupt()
@@ -172,7 +189,14 @@ class Orchestrator:
 
         from improvement.trace import TurnTrace, ensure_session, pop_stt_metrics
 
-        session_id = ensure_session(model=getattr(cfg, "claude_model_fast", "") if cfg else "")
+        # Prefer the orchestrator session_id (from Job, set by VoiceLane.submit)
+        # so TurnTrace rows group correctly per conversation.
+        orch_session_id = job.session_id
+        trace_session_id = (
+            orch_session_id
+            if orch_session_id
+            else ensure_session(model=getattr(cfg, "claude_model_fast", "") if cfg else "")
+        )
         stt_meta = pop_stt_metrics(command.text)
         trace_source = _trace_source(command.source)
 
@@ -186,7 +210,7 @@ class Orchestrator:
             and getattr(cfg, "streaming_tts", True)
         )
         try:
-            with TurnTrace(session_id=session_id, source=trace_source) as trace:
+            with TurnTrace(session_id=trace_session_id, source=trace_source) as trace:
                 trace.stt_text = command.text
                 trace.stt_confidence = stt_meta.get("stt_confidence")
                 trace.stt_ms = stt_meta.get("stt_ms")
@@ -221,16 +245,21 @@ class Orchestrator:
                         name="jarvis-tts-stream",
                     )
                     tts_thread.start()
-                    result = self._process_query(
+                    result = self._call_process_query(
                         command.text,
                         cfg,
+                        orch_session_id,
                         on_state=self._set_state,
                         speak=False,
                         on_sentence=sentence_q.put,
                     )
                 else:
-                    result = self._process_query(
-                        command.text, cfg, on_state=self._set_state, speak=command.speak,
+                    result = self._call_process_query(
+                        command.text,
+                        cfg,
+                        orch_session_id,
+                        on_state=self._set_state,
+                        speak=command.speak,
                     )
                 job.reply = result.get("reply", "")
                 job.warning = result.get("warning")
@@ -260,8 +289,15 @@ class Orchestrator:
                     job.state = JobState.DONE
 
                 if job.reply.strip():
-                    self._emit("job.transcript", job_id=command.id, heard=command.text,
-                               reply=job.reply, model=job.model, state=job.state.value)
+                    self._emit(
+                        "job.transcript",
+                        job_id=command.id,
+                        heard=command.text,
+                        reply=job.reply,
+                        model=job.model,
+                        state=job.state.value,
+                        session_id=orch_session_id,
+                    )
                 elif command.source == CommandSource.SCHEDULE:
                     logger.debug("Empty reply from scheduled plugin — no TTS.")
 
@@ -349,8 +385,8 @@ class Orchestrator:
             "reason": reason,
         }))
 
-    def _set_state(self, name: str) -> None:
-        self._emit("pipeline.state", state=name)
+    def _set_state(self, name: str, session_id: str | None = None) -> None:
+        self._emit("pipeline.state", state=name, session_id=session_id)
         # events.set_pipeline_state via bus subscriber (_sync_legacy in runtime).
 
     def _do_speak(self, text: str, cfg: Any) -> None:

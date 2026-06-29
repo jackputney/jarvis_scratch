@@ -27,6 +27,52 @@
 
 ---
 
+### 2026-06-29 — Session + Lane architecture — Sprint 9 Phase 1 — Jack
+[Agent: Claude Sonnet 4.6 — acting for Jack — 2026-06-29]
+
+**Branch:** `jack/sprint-9` | **Tests:** 564 passing
+
+**What changed:**
+- `orchestrator/session.py` (NEW) — `Session` dataclass, `SessionStore`, `LaneType`, `SessionState`; in-memory thread-safe registry of open conversations
+- `orchestrator/lanes.py` (NEW) — `VoiceLane` (wraps Orchestrator, session-aware submit, idle-continue), `BackgroundLane` (thread-pool concurrent tasks), `LaneManager` (routing decisions)
+- `orchestrator/types.py` — added `Turn` dataclass (request/response pair within a session); added `session_id` field to `Job`
+- `orchestrator/core.py` — accepts optional `session_store`; emits `session_id` on `job.transcript` and `pipeline.state` events; prefers orchestrator session_id over process-level TurnTrace session_id
+- `orchestrator/runtime.py` — exposes `get_session_store()` and `get_lane_manager()` singletons; `reset_for_tests()` tears down lanes cleanly
+- `dashboard/app.py` — `GET /api/sessions` and `GET /api/sessions/<id>` endpoints
+- `dashboard/templates/index.html` — Sessions panel in Overview grid, active session count metric card
+- `dashboard/static/app.js` — `loadSessions()` function, polls every 10s
+- `dashboard/static/style.css` — session card and badge styles
+- `improvement/trace.py` — `set_eval_mode()` guard + `reset_writer_for_tests()` clears it; `_apply_signal_detections` duplicate call removed (fixes 98.25% correction_rate bug)
+- `tests/test_session.py` (NEW) — 21 tests covering Session lifecycle, SessionStore, thread safety
+- `tests/test_lanes.py` (NEW) — 13 tests covering VoiceLane, BackgroundLane, LaneManager
+
+**Why:** Conversations are now first-class objects. The voice lane continues an idle session on barge-in; background tasks run concurrently without blocking voice. TurnTrace rows group correctly by conversation. Fixes the instrumentation bug that inflated correction_rate to 98%.
+
+**Watch out for:** Oliver's `pipeline.py` integration (Phase 2) should use `voice_lane.submit()` instead of `orchestrator.submit()` directly and pass the returned `session_id` into `process_query()`. Stable signatures are in `sessions.spec.md`. Also: run `DELETE FROM corrections WHERE turn_id = prev_turn_id;` against the production DB to purge the ~62 self-referential correction records from before this fix.
+
+---
+
+### 2026-06-25 — resolve 4 flagged audit items + sessions.spec.md — Jack
+
+[Agent: Cursor — acting for Jack — 2026-06-25]
+
+**Branch:** jack/sprint-8 | **Tests:** 526 passing
+
+**What changed:**
+- `tools/github.py` — `search_github_issues` now uses `/search/issues` when a query is provided (the list endpoint ignores `q`); scopes query with `repo:owner/repo is:issue is:state`.
+- `tools/hotkey.py` — `_active_listener` stores the live pynput `GlobalHotKeys` instance; `stop_hotkey_listener()` calls `.stop()` on it and clears both refs. Thread now actually exits on stop.
+- `tools/media.py` — `open_photos(query)` now opens `photos://search?q={encoded}` URL scheme (macOS 13+) with AppleScript fallback; query is passed to the system rather than silently ignored.
+- `dashboard/static/app.js` — accept button uses `_acceptInFlight` Set to prevent double-submission; button disabled during the request, re-enabled on completion.
+- `DOCS/sessions.spec.md` — full interface contract for Phase 1 sessions architecture: `Session`, `SessionStore`, `VoiceLane`, `BackgroundLane`, `Turn`, EventBus event payloads, pipeline.py change summary, open questions for Oliver, migration path.
+- `DOCS/TOOLS_AUDIT.md` — flagged items marked resolved.
+- Tests: 9 new tests covering all 4 fixes (see test files).
+
+**Why:** Closes all 4 items flagged during the sprint-8 audit pass. Sessions spec establishes the interface contract before Jack and Oliver start implementation.
+
+**Watch out for:** `photos://search?q=` requires macOS 13+; on earlier macOS the fallback activates Photos without searching (documented in the test). The sessions spec is a design doc only — `orchestrator/session.py` and `orchestrator/lanes.py` do not exist yet.
+
+---
+
 ### 2026-06-25 — full tools audit and debug pass — Jack
 
 [Agent: Cursor — acting for Jack — 2026-06-25]
@@ -45,27 +91,6 @@
 **Why:** Full audit revealed one HIGH (broken download tool), two MEDIUMs (silent exceptions), and two LOWs (missing platform branch, hardcoded interface). All fixed.
 
 **Watch out for:** `set_brightness` on macOS tries osascript — if the user hasn't granted Accessibility access it may fail gracefully and suggest `brew install brightness`. Four issues flagged for follow-up in `DOCS/TOOLS_AUDIT.md` but not fixed this sprint.
-
----
-
-### 2026-06-25 — native Dev Log append/read via Google Docs API — Jack
-
-[Agent: Cursor — acting for Jack — 2026-06-25]
-
-**Branch:** jack/sprint-7 | **Tests:** 457 passing
-
-**What changed:**
-- `tools/dev_log.py` — new `read_dev_log`, `get_dev_log_summary`, `append_dev_log_entry` tools backed by the Google Docs API; entries inserted at the top of the `## LOG` section.
-- `tools/google_auth.py` — added `https://www.googleapis.com/auth/documents` OAuth scope.
-- `config.py` — added `dev_log_doc_id` (shared sprint doc ID default) and `dev_log_author` ("Jack's Claude" default); both persisted via config.json so each machine can set its own author.
-- `tools/registry.py` — registered all three dev-log tools (`read_dev_log` + `get_dev_log_summary` in `READ_ONLY_TOOLS`, `append_dev_log_entry` in `MODERATE_TOOLS`); added tool definitions with descriptions.
-- `improvement/reflect.py` — `_auto_log_reflection` hook appends a brief summary to the Dev Log after every reflection run when Google OAuth is configured; silently skipped if not set up.
-- `tests/test_dev_log.py` — 17 tests covering read, append, summary, error handling, entry format, and config-driven author.
-- `DOCS/FEATURE_DOCS/DEV_LOG.md` — full feature documentation.
-
-**Why:** Every session was creating a new Google Doc because there was no write path to the existing one. This lands a permanent fix — Jarvis appends to the same doc every session.
-
-**Watch out for:** If `memory/google_token.json` predates this change, the Docs scope is missing. Delete the token file and restart Jarvis once to re-auth. Oliver's `dev_log_author` should be set to "Oliver's Claude" in his `config.json`.
 
 ---
 

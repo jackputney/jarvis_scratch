@@ -1,16 +1,16 @@
 # Project State
 
 <!-- AGENTS: Update this file every session. Takes 2 minutes. -->
-<!-- Last updated: 2026-06-25 | Updated by: Cursor acting for Jack (rebase onto main) -->
+<!-- Last updated: 2026-06-29 | Updated by: Cursor acting for Jack -->
 
 ## Quick status
 
 | Item | Value |
 |------|-------|
-| Tests | 517+ passing (combined); 7 darwin skips on Windows |
+| Tests | 564 passing on macOS (sprint-9 phase 1) |
 | Main tag | v0.5.0 (eced13b); sprint-6 work merged on top |
-| Jack branch | `jack/sprint-7` — dev log tools, PR #6 open |
-| Oliver branch | `oliver/sprint-6` (merged into main) |
+| Jack branch | `jack/sprint-9` — Session + Lane architecture, PR pending |
+| Oliver branch | pending — needs to read `sessions.spec.md` before pipeline.py work |
 
 ## What's on main (v0.5.0)
 
