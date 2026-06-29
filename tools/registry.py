@@ -47,6 +47,7 @@ from tools.music import (
     set_volume as music_set_volume,
     skip as music_skip,
 )
+from tools.phone import end_call, get_call_status, make_call
 from tools.pitch_deck import create_pitch_deck
 from tools.system_info import active_window, list_processes, system_info as pc_system_info
 from memory.semantic import remember as remember_fact, search as search_memory_index
@@ -998,6 +999,52 @@ TOOL_DEFINITIONS: list[dict] = [
             "required": ["summary"],
         },
     },
+    {
+        "name": "make_call",
+        "description": (
+            "Place an outbound phone call via Twilio. The recipient number must be "
+            "E.164 format (e.g. +14155551234). Requires user confirmation."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "to": {"type": "string", "description": "Recipient phone number in E.164 format."},
+                "purpose": {
+                    "type": "string",
+                    "description": "Optional reason for the call (logged for context).",
+                },
+            },
+            "required": ["to"],
+        },
+    },
+    {
+        "name": "end_call",
+        "description": "Hang up an active Twilio phone call.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "call_sid": {
+                    "type": "string",
+                    "description": "Twilio Call SID. Leave empty to end the most recent call.",
+                },
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "get_call_status",
+        "description": "Get the current status of a Twilio phone call (ringing, in-progress, completed, etc.).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "call_sid": {
+                    "type": "string",
+                    "description": "Twilio Call SID. Leave empty for the most recent call.",
+                },
+            },
+            "required": [],
+        },
+    },
 ]
 
 # ---------------------------------------------------------------------------
@@ -1110,6 +1157,9 @@ TOOL_DISPATCH: dict[str, callable] = {
     "append_dev_log_entry": lambda **kw: append_dev_log_entry(
         kw["summary"], kw.get("author", ""),
     ),
+    "make_call": lambda **kw: make_call(kw["to"], kw.get("purpose", "")),
+    "end_call": lambda **kw: end_call(kw.get("call_sid", "")),
+    "get_call_status": lambda **kw: get_call_status(kw.get("call_sid", "")),
 }
 
 # Read-only tools — never confirm.
@@ -1151,6 +1201,7 @@ READ_ONLY_TOOLS = frozenset({
     "open_downloads",
     "open_desktop",
     "check_for_updates",
+    "get_call_status",
 })
 
 # Low-risk mutating tools — auto-allow in voice mode (confirm gate does not apply).
@@ -1193,6 +1244,7 @@ MODERATE_TOOLS = frozenset({
     "create_own_issue",
     "comment_own_issue",
     "append_dev_log_entry",
+    "end_call",
 })
 
 # High-risk mutating tools — dashboard confirm required when confirm_before_execute is on.
@@ -1207,6 +1259,7 @@ CONFIRM_REQUIRED_TOOLS = frozenset({
     "create_own_pr",
     "apply_update",
     "restart_jarvis",
+    "make_call",
 })
 
 # Dashboard /api/tools/run two-step confirm. Includes voice auto-allow tools that

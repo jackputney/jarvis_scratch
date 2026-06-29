@@ -160,6 +160,9 @@ class Config:
     elevenlabs_api_key: str = field(default="", repr=False)
     google_client_secret: str = field(default="", repr=False)
     brave_api_key: str = field(default="", repr=False)
+    twilio_account_sid: str = field(default="", repr=False)
+    twilio_auth_token: str = field(default="", repr=False)
+    twilio_phone_number: str = field(default="", repr=False)
 
     @classmethod
     def _do_load(cls) -> "Config":
@@ -250,6 +253,9 @@ class Config:
         cfg.elevenlabs_api_key = os.environ.get("ELEVENLABS_API_KEY", "")
         cfg.google_client_secret = os.environ.get("GOOGLE_CLIENT_SECRET", "")
         cfg.brave_api_key = os.environ.get("BRAVE_API_KEY", "")
+        cfg.twilio_account_sid = os.environ.get("TWILIO_ACCOUNT_SID", "")
+        cfg.twilio_auth_token = os.environ.get("TWILIO_AUTH_TOKEN", "")
+        cfg.twilio_phone_number = os.environ.get("TWILIO_PHONE_NUMBER", "")
         env_google_id = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
         if env_google_id:
             cfg.google_client_id = env_google_id
