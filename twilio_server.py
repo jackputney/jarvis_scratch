@@ -177,11 +177,6 @@ class PhoneCallSession:
             from tools import phone as phone_tools
 
             phone_tools.set_active_call_sid("")
-        if self._call_sid:
-            release_phone_call(self._call_sid)
-            from tools import phone as phone_tools
-
-            phone_tools.set_active_call_sid("")
         if self._twilio_confirmed:
             logger.info("📞 Twilio call ended (call=%s)", self._call_sid)
         else:

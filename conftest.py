@@ -44,6 +44,7 @@ def temp_env(tmp_path, monkeypatch):
     monkeypatch.setattr(store, "_memory_root_override", tmp_path)
     monkeypatch.setattr(memory_db, "DB_PATH", db)
     memory_db.reset_init_flag_for_tests()
+    memory_db.init_db()
     monkeypatch.setattr(costs, "DB_PATH", db)
     monkeypatch.setattr(events, "DB_PATH", db)
     monkeypatch.setattr(variables, "DB_PATH", db)
