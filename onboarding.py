@@ -100,6 +100,7 @@ def run_onboarding_wizard(*, network_validation: bool = True) -> bool:
     from PyQt6.QtCore import Qt
     from PyQt6.QtWidgets import (
         QApplication,
+        QCheckBox,
         QFormLayout,
         QHBoxLayout,
         QLabel,
@@ -120,6 +121,12 @@ def run_onboarding_wizard(*, network_validation: bool = True) -> bool:
     cartesia_input = QLineEdit()
     cartesia_input.setEchoMode(QLineEdit.EchoMode.Password)
     cartesia_input.setPlaceholderText("Optional — leave blank for local TTS")
+
+    developer_checkbox = QCheckBox(
+        "I'm a developer working on Jarvis's own codebase (enables GitHub "
+        "self-modify and self-update tools)"
+    )
+    developer_checkbox.setChecked(False)
 
     status_label = QLabel("")
     status_label.setWordWrap(True)
@@ -178,6 +185,13 @@ def run_onboarding_wizard(*, network_validation: bool = True) -> bool:
         cartesia_form,
     )
 
+    _page(
+        "Developer access",
+        "By default Jarvis cannot modify its own codebase or push updates from "
+        "GitHub. Only enable this if you're actively developing Jarvis itself.",
+        developer_checkbox,
+    )
+
     summary = QLabel("")
     summary.setWordWrap(True)
     _page("Ready", "Review and click Finish to save your settings.", summary)
@@ -211,9 +225,15 @@ def run_onboarding_wizard(*, network_validation: bool = True) -> bool:
         next_btn.setVisible(not on_last)
         finish_btn.setVisible(on_last)
         if on_last:
+            dev_line = (
+                "Developer mode: ON — GitHub self-modify and self-update tools enabled."
+                if developer_checkbox.isChecked()
+                else "Developer mode: OFF — Jarvis cannot modify its own code or self-update."
+            )
             summary.setText(
                 "Your Anthropic key will be saved to:\n"
                 f"{env_path()}\n\n"
+                f"{dev_line}\n\n"
                 "Jarvis will register the global hotkey (Ctrl+Shift+Space) on launch."
             )
 
@@ -256,9 +276,9 @@ def run_onboarding_wizard(*, network_validation: bool = True) -> bool:
         try:
             from config import Config
 
-            Config.invalidate_cache()
+            Config.update_persisted({"developer_mode": developer_checkbox.isChecked()})
         except Exception:  # noqa: BLE001
-            pass
+            logger.warning("Could not persist developer_mode setting", exc_info=True)
         logger.info("✅ Onboarding complete — keys saved to %s", env_path())
         result["ok"] = True
         window.close()
