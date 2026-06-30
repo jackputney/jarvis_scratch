@@ -51,7 +51,7 @@ from memory.knowledge import get_recent_notes
 from memory.learn import record_exchange
 from memory.semantic import build_recall_context
 from memory.variables import build_variables_block
-from tools.registry import CONFIRM_REQUIRED_TOOLS, TOOL_DEFINITIONS, dispatch_tool
+from tools.registry import CONFIRM_REQUIRED_TOOLS, dispatch_tool, get_tool_definitions
 from tts.cartesia import speak, speak_stream, stop_speech
 from voice.speech_state import (
     BARGEIN_GRACE_SEC,
@@ -791,7 +791,7 @@ def _call_claude(
             model=model,
             max_tokens=1024,
             system=system_blocks,
-            tools=TOOL_DEFINITIONS,
+            tools=get_tool_definitions(cfg.developer_mode),
             messages=messages,
         )
         with _claude_future_lock:
@@ -893,6 +893,7 @@ def _call_claude(
                     confirm=cfg.confirm_before_execute,
                     confirm_timeout_sec=cfg.confirm_timeout_sec,
                     cancel_check=interrupt_requested,
+                    developer_mode=cfg.developer_mode,
                 )
             except Exception as exc:  # noqa: BLE001
                 tool_error = str(exc)

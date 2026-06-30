@@ -436,7 +436,7 @@ def create_app() -> Flask:
             CONFIRM_REQUIRED_TOOLS,
             MODERATE_TOOLS,
             READ_ONLY_TOOLS,
-            TOOL_DEFINITIONS,
+            get_tool_definitions,
         )
 
         def tier(name: str) -> str:
@@ -450,7 +450,9 @@ def create_app() -> Flask:
                 return "write"
             return "write"
 
-        tools = [{**defn, "tier": tier(defn["name"])} for defn in TOOL_DEFINITIONS]
+        cfg = Config.load()
+        defs = get_tool_definitions(cfg.developer_mode)
+        tools = [{**defn, "tier": tier(defn["name"])} for defn in defs]
         return jsonify({"tools": tools})
 
     @app.route("/api/tools/run", methods=["POST"])
@@ -464,10 +466,14 @@ def create_app() -> Flask:
             return jsonify({"ok": False, "error": "inputs must be an object"}), 400
 
         from dashboard.tools_run_confirm import consume, create_pending
-        from tools.registry import DASHBOARD_CONFIRM_TOOLS, TOOL_DISPATCH, dispatch_tool
+        from tools.registry import DASHBOARD_CONFIRM_TOOLS, DEV_ONLY_TOOLS, TOOL_DISPATCH, dispatch_tool
 
         if name not in TOOL_DISPATCH:
             return jsonify({"ok": False, "error": f"Unknown tool: {name}"}), 404
+
+        cfg = Config.load()
+        if not cfg.developer_mode and name in DEV_ONLY_TOOLS:
+            return jsonify({"ok": False, "error": f"Tool '{name}' is unavailable (developer mode is off)."}), 403
 
         confirm_id = (body.get("confirm_id") or "").strip()
         confirmed = bool(body.get("confirmed"))
@@ -491,7 +497,7 @@ def create_app() -> Flask:
             else:
                 return jsonify({"ok": False, "error": "confirmed must be true to execute"}), 400
 
-        result = dispatch_tool(name, inputs, confirm=False)
+        result = dispatch_tool(name, inputs, confirm=False, developer_mode=cfg.developer_mode)
         failed = result.startswith("Tool error") or result.startswith("Unknown tool")
         try:
             costs.log_tool_run(name, inputs, result, ok=not failed)

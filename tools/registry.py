@@ -1269,6 +1269,26 @@ CONFIRM_REQUIRED_TOOLS = frozenset({
 # are still too risky to run from the UI without explicit confirmation.
 DASHBOARD_CONFIRM_TOOLS = CONFIRM_REQUIRED_TOOLS | MODERATE_TOOLS | frozenset({"send_email"})
 
+# Self-modifying / ops tools — only safe to expose when Jarvis runs on a dev's own
+# machine against their own GitHub repo. Hidden entirely (not just confirm-gated)
+# when Config.developer_mode is False, e.g. for non-dev installs.
+DEV_ONLY_TOOLS = frozenset({
+    "create_own_branch",
+    "create_own_file",
+    "create_own_pr",
+    "create_own_issue",
+    "comment_own_issue",
+    "apply_update",
+    "restart_jarvis",
+})
+
+
+def get_tool_definitions(developer_mode: bool = True) -> list[dict]:
+    """Tool definitions to expose to the model, filtered for non-dev installs."""
+    if developer_mode:
+        return TOOL_DEFINITIONS
+    return [t for t in TOOL_DEFINITIONS if t["name"] not in DEV_ONLY_TOOLS]
+
 
 def _format_update_result(result: dict) -> str:
     if result["success"]:
@@ -1291,6 +1311,7 @@ def dispatch_tool(
     confirm: bool = False,
     confirm_timeout_sec: int = 30,
     cancel_check: callable | None = None,
+    developer_mode: bool = True,
 ) -> str:
     """Execute a tool by name with the given inputs dict.
 
@@ -1298,10 +1319,14 @@ def dispatch_tool(
     Low-risk mutating tools and all read-only tools run immediately.
 
     Returns the tool result as a plain string, or an error message if the tool
-    name is not registered or confirmation was denied.
+    name is not registered, is dev-only on a non-dev install, or confirmation
+    was denied.
     """
     if name not in TOOL_DISPATCH:
         return f"Unknown tool: {name}"
+
+    if not developer_mode and name in DEV_ONLY_TOOLS:
+        return f"Tool '{name}' is unavailable (developer mode is off)."
 
     if confirm and name in (CONFIRM_REQUIRED_TOOLS | MODERATE_TOOLS):
         from tools import confirm as confirm_mod
