@@ -33,6 +33,8 @@ def _load_dotenv_if_present() -> None:
 
 
 _PERSISTED_FIELDS = (
+    "developer_name",
+    "timezone",
     "llm_provider",
     "claude_model_fast",
     "claude_model_smart",
@@ -97,6 +99,8 @@ ELEVENLABS_VOICES: list[dict[str, str]] = [
 
 @dataclass
 class Config:
+    developer_name: str = "Jack"
+    timezone: str = ""  # empty = auto-detected from system at runtime
     llm_provider: str = "anthropic"  # anthropic | openai | gemini | auto (per-turn routing)
     claude_model_fast: str = "claude-haiku-4-5"
     claude_model_smart: str = "claude-sonnet-4-6"
@@ -167,6 +171,8 @@ class Config:
 
         stt_model = data.get("stt_model") or data.get("whisper_model", cls.stt_model)
         cfg = cls(
+            developer_name=data.get("developer_name", cls.developer_name),
+            timezone=data.get("timezone", cls.timezone),
             llm_provider=data.get("llm_provider", cls.llm_provider),
             claude_model_fast=data.get("claude_model_fast", cls.claude_model_fast),
             claude_model_smart=data.get("claude_model_smart", cls.claude_model_smart),
