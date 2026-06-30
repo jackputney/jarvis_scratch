@@ -19,22 +19,35 @@ def search_github_issues(repo: str, query: str = "", state: str = "open") -> str
     except ImportError as exc:
         return f"GitHub error: {exc}"
     owner_repo = repo.strip("/")
-    params: dict = {"state": state, "per_page": 10}
-    if query:
-        params["q"] = query
-    resp = requests.get(
-        f"https://api.github.com/repos/{owner_repo}/issues",
-        headers=_headers(),
-        params=params,
-        timeout=10,
-    )
-    if resp.status_code >= 400:
-        return f"GitHub error: HTTP {resp.status_code}"
+    try:
+        if query:
+            # Use the Search API so free-text queries actually work.
+            # The list endpoint ignores the `q` parameter entirely.
+            q_string = f"repo:{owner_repo} is:issue is:{state} {query}"
+            resp = requests.get(
+                "https://api.github.com/search/issues",
+                headers=_headers(),
+                params={"q": q_string, "per_page": 10},
+                timeout=10,
+            )
+            if resp.status_code >= 400:
+                return f"GitHub error: HTTP {resp.status_code}"
+            raw_issues = resp.json().get("items", [])
+        else:
+            resp = requests.get(
+                f"https://api.github.com/repos/{owner_repo}/issues",
+                headers=_headers(),
+                params={"state": state, "per_page": 10},
+                timeout=10,
+            )
+            if resp.status_code >= 400:
+                return f"GitHub error: HTTP {resp.status_code}"
+            raw_issues = [i for i in resp.json() if "pull_request" not in i]
+    except Exception as exc:  # noqa: BLE001
+        return f"GitHub error: {exc}"
     issues = []
-    for issue in resp.json():
-        if "pull_request" in issue:
-            continue
-        labels = ", ".join(l["name"] for l in issue.get("labels", []))
+    for issue in raw_issues:
+        labels = ", ".join(lb["name"] for lb in issue.get("labels", []))
         line = f"#{issue['number']} [{issue['state']}] {issue['title']}"
         if labels:
             line += f" ({labels})"

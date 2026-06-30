@@ -92,14 +92,16 @@
 
 ---
 
-## Flagged for Follow-up (not fixed this sprint)
+## Flagged for Follow-up — RESOLVED in sprint-8 (commit 2)
 
-| Issue | File | Severity | Notes |
-|-------|------|----------|-------|
-| `search_github_issues` `q` param ineffective | `tools/github.py` | Low | The GitHub list issues API ignores `q`; the search API (`/search/issues`) should be used instead. Needs API change. |
-| `hotkey.stop_hotkey_listener` doesn't stop thread | `tools/hotkey.py` | Low | Nulls the ref but the pynput listener keeps running. Fix requires calling `listener.stop()`. Needs care to avoid hotkey re-registration on start. |
-| `media.open_photos(query)` doesn't search | `tools/media.py` | Low | Opens Photos.app but doesn't execute a search. Photos has no reliable AppleScript search API — would need URL scheme or Shortcuts automation. |
-| Double-accept button fire on Thinks tab | `dashboard/static/app.js` | Low | Cosmetic (idempotent) but sends two API calls. Add a 500ms debounce on the accept button click. |
+All four items flagged during the initial audit pass were fixed in the same sprint:
+
+| Issue | File | Fix |
+|-------|------|-----|
+| `search_github_issues` `q` param ineffective | `tools/github.py` | When a query is provided, now uses `/search/issues` with `repo:owner/repo is:issue is:state query` scoping. Regression tests assert the endpoint URL. |
+| `hotkey.stop_hotkey_listener` doesn't stop thread | `tools/hotkey.py` | `_active_listener` module-level var now stores the pynput `GlobalHotKeys` instance; `stop_hotkey_listener()` calls `.stop()` on it. Thread exits cleanly. |
+| `media.open_photos(query)` doesn't search | `tools/media.py` | Now opens `photos://search?q={encoded_query}` URL scheme (macOS 13+). Falls back to activating Photos if URL scheme fails. |
+| Double-accept button fire on Thinks tab | `dashboard/static/app.js` | `_acceptInFlight: Set` tracks in-progress accepts by suggestion ID. Button is disabled during the request; duplicate clicks are no-ops until completion. |
 
 ---
 
@@ -108,9 +110,11 @@
 | Tier | Count | Tools |
 |------|-------|-------|
 | `READ_ONLY_TOOLS` | 35 | `get_current_time`, `web_search`, `get_weather`, calendar, email reads, sheets read, contacts, drive read, slack read, github reads, github_self reads, device info, clipboard read, file find, `check_for_updates` |
-| `AUTO_ALLOW_TOOLS` | 18 | `open_app`, volume/mute/brightness/DND/lock/appearance/screen-saver/wifi, media opens, `find_and_open_file`, `open_file`, `set_variable`, `write_note`, `remember`, `escalate`, `send_email` |
+| `AUTO_ALLOW_TOOLS` | 18 | `open_app`, volume/mute/brightness/DND/lock/appearance/screen-saver/wifi, media opens, `find_and_open_file`, `open_file`, `set_variable`, `write_note`, `remember`, `escalate`, `send_email`† |
 | `MODERATE_TOOLS` | 16 | Login items, music controls, `media_control`, `write_clipboard`, GitHub write (branch/issue/comment) |
 | `CONFIRM_REQUIRED_TOOLS` | 10 | `download_file`, sheets write, slack send, `create_github_comment`, `create_pitch_deck`, GitHub write (file/PR), `apply_update`, `restart_jarvis` |
+
+† `send_email` is `AUTO_ALLOW` for voice — **intentional design decision**. The dashboard path still requires a confirm modal via `DASHBOARD_CONFIRM_TOOLS`. Risk accepted: a misheard voice command could send email. Documented in `tools/registry.py`.
 
 ---
 

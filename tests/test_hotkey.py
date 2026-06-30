@@ -194,3 +194,30 @@ def test_start_hotkey_listener_starts_daemon_thread(monkeypatch):
     assert t is not None
     assert isinstance(t, threading.Thread)
     assert t.daemon
+
+
+def test_stop_hotkey_listener_calls_stop_on_listener():
+    """Regression: stop_hotkey_listener previously only nulled the thread ref.
+    Now it calls .stop() on the active pynput listener instance."""
+    import tools.hotkey as hotkey_mod
+
+    mock_listener = MagicMock()
+    hotkey_mod._active_listener = mock_listener
+    hotkey_mod._listener_thread = threading.Thread(target=lambda: None, daemon=True)
+
+    hotkey_mod.stop_hotkey_listener()
+
+    mock_listener.stop.assert_called_once()
+    assert hotkey_mod._active_listener is None
+    assert hotkey_mod._listener_thread is None
+
+
+def test_stop_hotkey_listener_safe_when_no_active_listener():
+    """stop_hotkey_listener must not raise when called without a running listener."""
+    import tools.hotkey as hotkey_mod
+
+    hotkey_mod._active_listener = None
+    hotkey_mod._listener_thread = None
+
+    # Should not raise
+    hotkey_mod.stop_hotkey_listener()
