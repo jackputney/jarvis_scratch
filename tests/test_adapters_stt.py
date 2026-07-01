@@ -9,6 +9,7 @@ import adapters.stt as stt
 
 def _reset_cache():
     stt._backend = None
+    stt._resolved_faster_models.clear()
 
 
 def test_resolve_faster_backend():
@@ -47,11 +48,71 @@ def test_transcribe_delegates_to_backend(monkeypatch):
     class FakeBackend:
         name = "faster"
 
-        def transcribe(self, audio, model_name, *, hotwords=None):
-            captured.update(model=model_name, hotwords=hotwords)
+        def transcribe(self, audio, model_name, *, hotwords=None, device="", compute_type=""):
+            captured.update(
+                model=model_name,
+                hotwords=hotwords,
+                device=device,
+                compute_type=compute_type,
+            )
             return "hello world"
 
     monkeypatch.setattr(stt, "resolve_backend", lambda _b: FakeBackend())
-    out = stt.transcribe([0.0, 0.1], "small", "faster", hotwords="Jack, Sarah")
+    out = stt.transcribe(
+        [0.0, 0.1],
+        "large-v3-turbo",
+        "faster",
+        hotwords="Jack, Sarah",
+        device="cuda",
+        compute_type="float16",
+    )
     assert out == "hello world"
-    assert captured == {"model": "small", "hotwords": "Jack, Sarah"}
+    assert captured == {
+        "model": "large-v3-turbo",
+        "hotwords": "Jack, Sarah",
+        "device": "cuda",
+        "compute_type": "float16",
+    }
+
+
+def test_resolve_faster_whisper_model_prefers_native_turbo_tag():
+    _reset_cache()
+    assert stt.resolve_faster_whisper_model("large-v3-turbo") == "large-v3-turbo"
+
+
+def test_mlx_repo_large_v3_turbo_omits_mlx_suffix():
+    assert stt.mlx_repo("large-v3-turbo") == "mlx-community/whisper-large-v3-turbo"
+    assert stt.mlx_repo("small") == "mlx-community/whisper-small-mlx"
+
+
+def test_resolve_device_compute_auto():
+    device, compute = stt.resolve_device_compute("", "")
+    assert device in ("cuda", "cpu")
+    assert compute == ("float16" if device == "cuda" else "int8")
+
+
+def test_resolve_device_compute_config_override():
+    device, compute = stt.resolve_device_compute("cpu", "int8")
+    assert device == "cpu"
+    assert compute == "int8"
+
+
+def test_faster_ensure_passes_device_compute(monkeypatch):
+    _reset_cache()
+    calls = []
+
+    class FakeWhisperModel:
+        def __init__(self, model_name, *, device, compute_type):
+            calls.append((model_name, device, compute_type))
+
+        def transcribe(self, *args, **kwargs):
+            return [], None
+
+    monkeypatch.setattr(
+        "faster_whisper.WhisperModel",
+        FakeWhisperModel,
+    )
+    backend = stt.FasterWhisperBackend()
+    backend._ensure("large-v3-turbo", device="cpu", compute_type="int8")
+    assert calls == [("large-v3-turbo", "cpu", "int8")]
+

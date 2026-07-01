@@ -15,6 +15,7 @@ from enum import Enum
 
 class CommandSource(str, Enum):
     VOICE = "voice"
+    PHONE = "phone"
     DASHBOARD = "dashboard"
     SCHEDULE = "schedule"
     WEBHOOK = "webhook"

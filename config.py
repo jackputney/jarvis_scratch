@@ -47,6 +47,8 @@ _PERSISTED_FIELDS = (
     "whisper_model",
     "stt_backend",
     "stt_model",
+    "stt_device",
+    "stt_compute_type",
     "streaming_tts",
     "tts_provider",
     "cartesia_voice_id",
@@ -70,6 +72,7 @@ _PERSISTED_FIELDS = (
     "hotkey_enabled",
     "hotkey_combo",
     "dashboard_native_window",
+    "phone_autonomous_enabled",
     "memory_inject_last_n_notes",
     "memory_root_path",
     "memory_auto_learn",
@@ -113,9 +116,11 @@ class Config:
     gemini_model_fast: str = "gemini-2.5-flash"
     gemini_model_smart: str = "gemini-2.5-pro"
     routing_word_threshold: int = 20
-    whisper_model: str = "small"  # cross-platform: exists for both mlx-whisper and faster-whisper
+    whisper_model: str = "large-v3-turbo"  # kept in sync with stt_model; both feed effective_stt_model()
     stt_backend: str = "mlx"  # macOS native; auto-falls back to faster-whisper on Windows/Linux
-    stt_model: str = "small"  # "small" balances accuracy/speed and resolves on both STT backends
+    stt_model: str = "large-v3-turbo"  # best accuracy/speed tradeoff; resolves on mlx + faster-whisper
+    stt_device: str = ""  # empty = auto (cuda when available, else cpu)
+    stt_compute_type: str = ""  # empty = auto (float16 on cuda, int8 on cpu)
     streaming_tts: bool = True
     tts_provider: str = "elevenlabs"  # elevenlabs | cartesia | pyttsx3
     cartesia_voice_id: str = "a0e99841-438c-4a64-b679-ae501e7d6091"
@@ -139,6 +144,7 @@ class Config:
     hotkey_enabled: bool = True  # register a global keyboard shortcut to wake Jarvis
     hotkey_combo: str = "<ctrl>+<shift>+<space>"  # pynput format: <ctrl>/<shift>/<alt>/<cmd> + key
     dashboard_native_window: bool = True  # open dashboard in PyWebView (Flask still on :7777)
+    phone_autonomous_enabled: bool = True  # false = kill switch; phone calls escalate/end
     memory_inject_last_n_notes: int = 5
     memory_root_path: str = ""
     memory_auto_learn: bool = True
@@ -194,6 +200,8 @@ class Config:
             whisper_model=data.get("whisper_model", cls.whisper_model),
             stt_backend=data.get("stt_backend", cls.stt_backend),
             stt_model=stt_model,
+            stt_device=data.get("stt_device", cls.stt_device),
+            stt_compute_type=data.get("stt_compute_type", cls.stt_compute_type),
             streaming_tts=data.get("streaming_tts", cls.streaming_tts),
             tts_provider=data.get("tts_provider", cls.tts_provider),
             cartesia_voice_id=data.get("cartesia_voice_id", cls.cartesia_voice_id),
@@ -226,6 +234,7 @@ class Config:
             hotkey_enabled=data.get("hotkey_enabled", cls.hotkey_enabled),
             hotkey_combo=data.get("hotkey_combo", cls.hotkey_combo),
             dashboard_native_window=data.get("dashboard_native_window", cls.dashboard_native_window),
+            phone_autonomous_enabled=data.get("phone_autonomous_enabled", cls.phone_autonomous_enabled),
             memory_inject_last_n_notes=data.get(
                 "memory_inject_last_n_notes", cls.memory_inject_last_n_notes
             ),

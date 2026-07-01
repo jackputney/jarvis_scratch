@@ -200,17 +200,44 @@ def run_phone_turn(
     text: str,
     cfg: Config,
     session_id: str | None = None,
+    *,
+    call_sid: str | None = None,
 ) -> dict[str, Any]:
-    """Submit one utterance to the voice lane (no local speaker TTS)."""
+    """Submit one utterance to the voice lane (no local speaker TTS).
+
+    Applies phone safety: halt gate, human-escalation phrases, and CommandSource.PHONE
+    so side-effecting tools are blocked in the pipeline.
+    """
     from orchestrator.runtime import get_lane_manager, get_orchestrator
     from orchestrator.types import Command, CommandSource
+    from tools import phone as phone_tools
+
+    sid = (call_sid or phone_tools.get_active_call_sid() or "").strip()
+
+    if not phone_tools.phone_autonomous_allowed(cfg, sid):
+        return {
+            "reply": "Connecting you to someone who can help.",
+            "session_id": session_id,
+            "capped": False,
+            "escalate": True,
+            "escalate_reason": "halt",
+        }
+
+    if phone_tools.caller_requests_human(text):
+        return {
+            "reply": "Connecting you to someone who can help.",
+            "session_id": session_id,
+            "capped": False,
+            "escalate": True,
+            "escalate_reason": "caller_request",
+        }
 
     lane_manager = get_lane_manager()
     voice_lane = lane_manager.voice
     orchestrator = get_orchestrator()
 
     sub = voice_lane.submit(
-        Command(text=text, source=CommandSource.VOICE, speak=False),
+        Command(text=text, source=CommandSource.PHONE, speak=False),
         session_id=session_id,
     )
     if not sub.accepted or not sub.job_id:
@@ -218,13 +245,15 @@ def run_phone_turn(
             "reply": "I'm busy right now — try again in a moment.",
             "session_id": session_id,
             "capped": False,
+            "escalate": False,
         }
 
     job = orchestrator.wait(sub.job_id, timeout=180.0)
     if job is None:
-        return {"reply": "", "session_id": session_id, "capped": False}
+        return {"reply": "", "session_id": session_id, "capped": False, "escalate": False}
     return {
         "reply": (job.reply or "").strip(),
         "session_id": job.session_id,
         "capped": bool(job.capped),
+        "escalate": False,
     }

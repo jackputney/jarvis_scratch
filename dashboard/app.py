@@ -127,6 +127,15 @@ def _ensure_bus_subscription() -> None:
         logger.debug("SSE bus subscription unavailable", exc_info=True)
 
 
+def _active_phone_call_sid() -> str:
+    try:
+        from tools import phone as phone_tools
+
+        return phone_tools.get_active_call_sid()
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def _pending_confirm() -> dict | None:
     try:
         from tools import confirm as tool_confirm
@@ -190,6 +199,8 @@ def create_app() -> Flask:
             "spend": costs.get_spend_summary(cfg.daily_budget_usd, cfg.monthly_budget_usd),
             "conversations": events.get_recent_conversations(50),
             "pending_confirm": _pending_confirm(),
+            "phone_autonomous_enabled": cfg.phone_autonomous_enabled,
+            "phone_active_call_sid": _active_phone_call_sid(),
         })
 
     @app.route("/api/metrics")
@@ -723,6 +734,38 @@ def create_app() -> Flask:
 
         get_orchestrator().cancel_current()
         return jsonify({"ok": True})
+
+    @app.route("/api/phone/halt", methods=["POST"])
+    def api_phone_halt():  # noqa: ANN202
+        """Kill switch: stop autonomous phone turns and transfer/end the active call."""
+        import pipeline
+        from orchestrator.runtime import get_orchestrator
+        from tools import phone as phone_tools
+
+        body = request.get_json(silent=True) or {}
+        call_sid = (body.get("call_sid") or phone_tools.get_active_call_sid() or "").strip()
+        cfg = Config.update_persisted({"phone_autonomous_enabled": False})
+        transfer_msg = phone_tools.halt_phone_autonomous(call_sid=call_sid, persist=False)
+        get_orchestrator().cancel_current()
+        pipeline.request_interrupt()
+        return jsonify({
+            "ok": True,
+            "phone_autonomous_enabled": cfg.phone_autonomous_enabled,
+            "call_sid": call_sid or None,
+            "transfer": transfer_msg,
+        })
+
+    @app.route("/api/phone/resume", methods=["POST"])
+    def api_phone_resume():  # noqa: ANN202
+        from tools import phone as phone_tools
+
+        cfg = Config.update_persisted({"phone_autonomous_enabled": True})
+        resume_msg = phone_tools.resume_phone_autonomous(persist=False)
+        return jsonify({
+            "ok": True,
+            "phone_autonomous_enabled": cfg.phone_autonomous_enabled,
+            "message": resume_msg,
+        })
 
     @app.route("/api/confirm/respond", methods=["POST"])
     def api_confirm_respond():  # noqa: ANN202

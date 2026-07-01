@@ -72,4 +72,6 @@ def test_run_phone_turn_uses_voice_lane(monkeypatch):
     assert out["reply"] == "On it."
     assert out["session_id"] == "sess-abc"
     voice_lane.submit.assert_called_once()
-    assert voice_lane.submit.call_args[0][0].speak is False
+    submitted = voice_lane.submit.call_args[0][0]
+    assert submitted.speak is False
+    assert submitted.source.value == "phone"

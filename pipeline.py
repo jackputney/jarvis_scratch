@@ -51,7 +51,7 @@ from memory.knowledge import get_recent_notes
 from memory.learn import record_exchange
 from memory.semantic import build_recall_context
 from memory.variables import build_variables_block
-from tools.registry import CONFIRM_REQUIRED_TOOLS, dispatch_tool, get_tool_definitions
+from tools.registry import CONFIRM_REQUIRED_TOOLS, dispatch_tool, get_tool_definitions, phone_tool_allowed
 from tts.cartesia import speak, speak_stream, stop_speech
 from voice.speech_state import (
     BARGEIN_GRACE_SEC,
@@ -520,6 +520,8 @@ def _transcribe(audio_bytes: bytes, cfg: Config) -> str:
         cfg.effective_stt_model(),
         cfg.stt_backend,
         hotwords=_stt_hotwords() or None,
+        device=cfg.stt_device,
+        compute_type=cfg.stt_compute_type,
     )
 
     text = strip_wake_phrase(raw, cfg.wake_word)
@@ -599,7 +601,12 @@ def warmup_stt(cfg: Config) -> None:
 
     from adapters.stt import warmup as stt_warmup
 
-    stt_warmup(cfg.effective_stt_model(), cfg.stt_backend)
+    stt_warmup(
+        cfg.effective_stt_model(),
+        cfg.stt_backend,
+        device=cfg.stt_device,
+        compute_type=cfg.stt_compute_type,
+    )
 
 
 def _build_system_blocks(cfg: Config, query_text: str = "") -> list[dict[str, Any]]:
@@ -754,6 +761,8 @@ def _call_claude(
     history: list[dict[str, Any]] | None = None,
     on_state: Callable[[str], None] | None = None,
     on_sentence: Callable[[str], None] | None = None,
+    *,
+    phone_mode: bool = False,
 ) -> tuple[str, str, float, bool]:
     from llm import get_llm_client
     from llm.router import models_for, resolve_models
@@ -872,7 +881,9 @@ def _call_claude(
                 return reply_text.strip() or "Stopped.", model, total_cost, stream_spoken
             logger.info("🔧 Tool: %s(%s)", tu["name"], tu["input"])
             needs_confirm = (
-                cfg.confirm_before_execute and tu["name"] in CONFIRM_REQUIRED_TOOLS
+                not phone_mode
+                and cfg.confirm_before_execute
+                and tu["name"] in CONFIRM_REQUIRED_TOOLS
             )
             if needs_confirm:
                 _emit_pipeline_state("WAITING_CONFIRM", on_state)
@@ -887,14 +898,21 @@ def _call_claude(
             t_tool = time.monotonic()
             tool_error: str | None = None
             try:
-                result = dispatch_tool(
-                    tu["name"],
-                    tu["input"],
-                    confirm=cfg.confirm_before_execute,
-                    confirm_timeout_sec=cfg.confirm_timeout_sec,
-                    cancel_check=interrupt_requested,
-                    developer_mode=cfg.developer_mode,
-                )
+                if phone_mode and not phone_tool_allowed(tu["name"]):
+                    result = (
+                        f"Tool '{tu['name']}' cannot run during a phone call. "
+                        "Offer to transfer the caller to a human."
+                    )
+                else:
+                    result = dispatch_tool(
+                        tu["name"],
+                        tu["input"],
+                        confirm=cfg.confirm_before_execute and not phone_mode,
+                        confirm_timeout_sec=cfg.confirm_timeout_sec,
+                        cancel_check=interrupt_requested,
+                        developer_mode=cfg.developer_mode,
+                        phone_mode=phone_mode,
+                    )
             except Exception as exc:  # noqa: BLE001
                 tool_error = str(exc)
                 result = f"Tool error: {exc}"
@@ -974,6 +992,8 @@ def process_query(
     speak: bool = False,
     on_sentence: Callable[[str], None] | None = None,
     session_id: str | None = None,
+    *,
+    phone_mode: bool = False,
 ) -> dict:
     if not _query_lock.acquire(blocking=False):
         logger.warning("⏳ Query rejected — another request is in flight.")
@@ -1034,6 +1054,7 @@ def process_query(
             )
         reply, model, cost, stream_spoken = _call_claude(
             text, cfg, history=history, on_state=on_state, on_sentence=on_sentence,
+            phone_mode=phone_mode,
         )
         latency_ms = int((time.time() - t0) * 1000)
         if _should_store_in_history(reply):

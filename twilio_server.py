@@ -35,6 +35,8 @@ logger = logging.getLogger("jarvis.twilio")
 
 TWILIO_PORT = 8765
 PHONE_GREETING = "Hello, this is Jarvis. How can I help?"
+PHONE_MAX_CONSECUTIVE_MISSES = 3
+PHONE_HALT_FAREWELL = "Connecting you to someone who can help."
 
 
 def _env_value(key: str) -> str:
@@ -79,7 +81,43 @@ class PhoneCallSession:
         self._voice_session_id: str | None = None
         self._turn_lock = asyncio.Lock()
         self._closed = False
+        self._halted = False
         self._twilio_confirmed = False
+        self._consecutive_misses = 0
+
+    async def _escalate_or_end(self, farewell: str = "") -> None:
+        """Transfer to a human or end the call; idempotent."""
+        if self._halted:
+            return
+        self._halted = True
+        from pipeline import request_interrupt
+        from tools import phone as phone_tools
+
+        request_interrupt()
+        msg = (farewell or PHONE_HALT_FAREWELL).strip()
+        if msg and self._stream_sid:
+            try:
+                await self._speak(msg)
+            except Exception:  # noqa: BLE001
+                logger.exception("Farewell TTS failed during escalation")
+        if self._call_sid:
+            await asyncio.to_thread(
+                phone_tools.escalate_to_human,
+                self._call_sid,
+                "phone session escalation",
+            )
+        await self.close()
+
+    async def _check_halt(self) -> bool:
+        """If autonomous mode is off, escalate immediately. Returns True if halted."""
+        if self._halted or self._closed:
+            return True
+        from tools import phone as phone_tools
+
+        if not phone_tools.phone_autonomous_allowed(self._cfg, self._call_sid or ""):
+            await self._escalate_or_end(PHONE_HALT_FAREWELL)
+            return True
+        return False
 
     async def handle_message(self, msg: dict[str, Any]) -> None:
         event = msg.get("event")
@@ -112,10 +150,14 @@ class PhoneCallSession:
                 media_format.get("encoding"),
                 media_format.get("sampleRate"),
             )
+            if await self._check_halt():
+                return
             await self._speak(PHONE_GREETING)
 
         elif event == "media":
             if self._closed or not self._stream_sid:
+                return
+            if await self._check_halt():
                 return
             mulaw = parse_media_message(msg)
             utterance_pcm = self._detector.feed(mulaw)
@@ -134,13 +176,35 @@ class PhoneCallSession:
         async with self._turn_lock:
             if self._closed or not self._stream_sid:
                 return
-            text = await asyncio.to_thread(transcribe_utterance, pcm_bytes, self._cfg)
-            if not text:
+            if await self._check_halt():
                 return
+            text = await asyncio.to_thread(transcribe_utterance, pcm_bytes, self._cfg)
+            if await self._check_halt():
+                return
+            if not text:
+                self._consecutive_misses += 1
+                if self._consecutive_misses >= PHONE_MAX_CONSECUTIVE_MISSES:
+                    logger.info(
+                        "📞 %d consecutive misses — escalating to human",
+                        self._consecutive_misses,
+                    )
+                    await self._escalate_or_end(PHONE_HALT_FAREWELL)
+                return
+            self._consecutive_misses = 0
             logger.info("📞 Caller said: %r", text)
             result = await asyncio.to_thread(
-                run_phone_turn, text, self._cfg, self._voice_session_id,
+                run_phone_turn,
+                text,
+                self._cfg,
+                self._voice_session_id,
+                call_sid=self._call_sid,
             )
+            if await self._check_halt():
+                return
+            if result.get("escalate"):
+                farewell = (result.get("reply") or PHONE_HALT_FAREWELL).strip()
+                await self._escalate_or_end(farewell)
+                return
             self._voice_session_id = result.get("session_id") or self._voice_session_id
             reply = (result.get("reply") or "").strip()
             if result.get("capped"):

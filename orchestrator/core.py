@@ -172,8 +172,13 @@ class Orchestrator:
         session_id: str | None,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        """Call process_query, passing session_id only if the handler accepts it."""
+        """Call process_query, passing only kwargs the handler accepts."""
         params = inspect.signature(self._process_query).parameters
+        accepts_var_kw = any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
+        )
+        if not accepts_var_kw:
+            kwargs = {k: v for k, v in kwargs.items() if k in params}
         if session_id is not None and "session_id" in params:
             return self._process_query(text, cfg, session_id=session_id, **kwargs)
         return self._process_query(text, cfg, **kwargs)
@@ -252,6 +257,7 @@ class Orchestrator:
                         on_state=self._set_state,
                         speak=False,
                         on_sentence=sentence_q.put,
+                        phone_mode=command.source == CommandSource.PHONE,
                     )
                 else:
                     result = self._call_process_query(
@@ -260,6 +266,7 @@ class Orchestrator:
                         orch_session_id,
                         on_state=self._set_state,
                         speak=command.speak,
+                        phone_mode=command.source == CommandSource.PHONE,
                     )
                 job.reply = result.get("reply", "")
                 job.warning = result.get("warning")
@@ -432,6 +439,8 @@ class Orchestrator:
 def _trace_source(source: CommandSource) -> str:
     if source == CommandSource.VOICE:
         return "voice"
+    if source == CommandSource.PHONE:
+        return "phone"
     if source == CommandSource.DASHBOARD:
         return "dashboard"
     if source in (CommandSource.SCHEDULE, CommandSource.PLUGIN, CommandSource.WEBHOOK):

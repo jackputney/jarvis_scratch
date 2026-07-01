@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from twilio_server import (
+    PHONE_MAX_CONSECUTIVE_MISSES,
+    PhoneCallSession,
     build_twiml_response,
     clear_caller_audio,
     mark_audio,
@@ -112,3 +115,84 @@ class TestMediaWsUrl:
             lambda key: "8765" if key == "TWILIO_WS_PORT" else "",
         )
         assert resolve_media_ws_url("myhost.ngrok.io", secure=True) == "wss://myhost.ngrok.io:8765"
+
+
+class TestPhoneCallSessionSafety:
+    def test_halt_on_start_escalates(self, monkeypatch):
+        import asyncio
+        from tools import phone as phone_tools
+
+        phone_tools.reset_phone_safety_state_for_tests()
+        cfg = MagicMock()
+        cfg.phone_autonomous_enabled = False
+        monkeypatch.setattr("twilio_server.Config.load", lambda: cfg)
+        monkeypatch.setattr("twilio_server.try_acquire_phone_call", lambda _sid: True)
+
+        session = PhoneCallSession(AsyncMock(), peer="test")
+        session._escalate_or_end = AsyncMock()
+        session._speak = AsyncMock()
+
+        async def _run():
+            await session.handle_message({
+                "event": "start",
+                "streamSid": "MZ1",
+                "start": {"callSid": "CAhalt", "mediaFormat": {"encoding": "audio/x-mulaw", "sampleRate": 8000}},
+            })
+
+        asyncio.run(_run())
+        session._escalate_or_end.assert_awaited_once()
+        session._speak.assert_not_awaited()
+
+    def test_consecutive_misses_escalate(self, monkeypatch):
+        import asyncio
+        from tools import phone as phone_tools
+
+        phone_tools.reset_phone_safety_state_for_tests()
+        cfg = MagicMock()
+        cfg.phone_autonomous_enabled = True
+        monkeypatch.setattr("twilio_server.Config.load", lambda: cfg)
+
+        session = PhoneCallSession(AsyncMock(), peer="test")
+        session._stream_sid = "MZ1"
+        session._call_sid = "CA1"
+        session._escalate_or_end = AsyncMock()
+        session._consecutive_misses = PHONE_MAX_CONSECUTIVE_MISSES - 1
+
+        async def _run():
+            with patch("twilio_server.transcribe_utterance", return_value=None):
+                await session._handle_utterance(b"\x00" * 100)
+
+        asyncio.run(_run())
+        session._escalate_or_end.assert_awaited_once()
+
+    def test_turn_escalate_flag_transfers(self, monkeypatch):
+        import asyncio
+        from tools import phone as phone_tools
+
+        phone_tools.reset_phone_safety_state_for_tests()
+        cfg = MagicMock()
+        cfg.phone_autonomous_enabled = True
+        monkeypatch.setattr("twilio_server.Config.load", lambda: cfg)
+
+        session = PhoneCallSession(AsyncMock(), peer="test")
+        session._stream_sid = "MZ1"
+        session._call_sid = "CA2"
+        session._escalate_or_end = AsyncMock()
+        session._speak = AsyncMock()
+
+        async def _run():
+            with patch("twilio_server.transcribe_utterance", return_value="talk to a person"):
+                with patch(
+                    "twilio_server.run_phone_turn",
+                    return_value={
+                        "reply": "Connecting you.",
+                        "escalate": True,
+                        "session_id": None,
+                        "capped": False,
+                    },
+                ):
+                    await session._handle_utterance(b"\x00" * 100)
+
+        asyncio.run(_run())
+        session._escalate_or_end.assert_awaited_once_with("Connecting you.")
+        session._speak.assert_not_awaited()

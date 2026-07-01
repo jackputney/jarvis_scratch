@@ -1269,6 +1269,9 @@ CONFIRM_REQUIRED_TOOLS = frozenset({
 # are still too risky to run from the UI without explicit confirmation.
 DASHBOARD_CONFIRM_TOOLS = CONFIRM_REQUIRED_TOOLS | MODERATE_TOOLS | frozenset({"send_email"})
 
+# Phone callers cannot use the dashboard confirm gate — only read-only + escalate.
+PHONE_ALLOWED_TOOLS = READ_ONLY_TOOLS | frozenset({"escalate"})
+
 # Self-modifying / ops tools — only safe to expose when Jarvis runs on a dev's own
 # machine against their own GitHub repo. Hidden entirely (not just confirm-gated)
 # when Config.developer_mode is False, e.g. for non-dev installs.
@@ -1305,6 +1308,11 @@ def _format_memory_hits(hits: list[dict]) -> str:
     return "\n\n".join(lines)
 
 
+def phone_tool_allowed(name: str) -> bool:
+    """True when a tool may run during a Twilio phone turn."""
+    return name in PHONE_ALLOWED_TOOLS
+
+
 def dispatch_tool(
     name: str,
     inputs: dict,
@@ -1312,6 +1320,7 @@ def dispatch_tool(
     confirm_timeout_sec: int = 30,
     cancel_check: callable | None = None,
     developer_mode: bool = True,
+    phone_mode: bool = False,
 ) -> str:
     """Execute a tool by name with the given inputs dict.
 
@@ -1327,6 +1336,12 @@ def dispatch_tool(
 
     if not developer_mode and name in DEV_ONLY_TOOLS:
         return f"Tool '{name}' is unavailable (developer mode is off)."
+
+    if phone_mode and not phone_tool_allowed(name):
+        return (
+            f"Tool '{name}' cannot run during a phone call. "
+            "Offer to transfer the caller to a human."
+        )
 
     if confirm and name in (CONFIRM_REQUIRED_TOOLS | MODERATE_TOOLS):
         from tools import confirm as confirm_mod
