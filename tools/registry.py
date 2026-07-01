@@ -1290,11 +1290,13 @@ DEV_ONLY_TOOLS = frozenset({
 # True. Everything else is hidden so nothing can misfire during a live demo. Reversible:
 # flip demo_mode off in config.json to restore the full toolset. Nothing is deleted.
 DEMO_TOOLS = frozenset({
-    "get_todays_schedule",  # calendar
+    "get_todays_schedule",  # calendar — today
+    "get_calendar_events",  # calendar — arbitrary day/range
+    "get_unread_emails",    # gmail — unread
+    "search_emails",        # gmail — find an email (read-only; send_email left out for demo safety)
     "get_weather",          # weather
     "web_search",           # answer general questions
     "remember",             # take a note / remember a fact
-    "get_current_time",     # time (simple + reliable)
     "search_and_play",      # play music
 })
 
