@@ -800,7 +800,7 @@ def _call_claude(
             model=model,
             max_tokens=1024,
             system=system_blocks,
-            tools=get_tool_definitions(cfg.developer_mode),
+            tools=get_tool_definitions(cfg.developer_mode, cfg.demo_mode),
             messages=messages,
         )
         with _claude_future_lock:

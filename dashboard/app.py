@@ -462,7 +462,7 @@ def create_app() -> Flask:
             return "write"
 
         cfg = Config.load()
-        defs = get_tool_definitions(cfg.developer_mode)
+        defs = get_tool_definitions(cfg.developer_mode, cfg.demo_mode)
         tools = [{**defn, "tier": tier(defn["name"])} for defn in defs]
         return jsonify({"tools": tools})
 

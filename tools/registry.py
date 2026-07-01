@@ -1286,8 +1286,27 @@ DEV_ONLY_TOOLS = frozenset({
 })
 
 
-def get_tool_definitions(developer_mode: bool = True) -> list[dict]:
-    """Tool definitions to expose to the model, filtered for non-dev installs."""
+# Demo allowlist — the small, reliable set of tools exposed when Config.demo_mode is
+# True. Everything else is hidden so nothing can misfire during a live demo. Reversible:
+# flip demo_mode off in config.json to restore the full toolset. Nothing is deleted.
+DEMO_TOOLS = frozenset({
+    "get_todays_schedule",  # calendar
+    "get_weather",          # weather
+    "web_search",           # answer general questions
+    "remember",             # take a note / remember a fact
+    "get_current_time",     # time (simple + reliable)
+    "search_and_play",      # play music
+})
+
+
+def get_tool_definitions(developer_mode: bool = True, demo_mode: bool = False) -> list[dict]:
+    """Tool definitions to expose to the model.
+
+    demo_mode wins: it exposes only the DEMO_TOOLS allowlist. Otherwise the full set,
+    minus self-modifying DEV_ONLY_TOOLS on non-dev installs.
+    """
+    if demo_mode:
+        return [t for t in TOOL_DEFINITIONS if t["name"] in DEMO_TOOLS]
     if developer_mode:
         return TOOL_DEFINITIONS
     return [t for t in TOOL_DEFINITIONS if t["name"] not in DEV_ONLY_TOOLS]

@@ -5,12 +5,22 @@ from __future__ import annotations
 
 import pytest
 
-from tools.registry import DEV_ONLY_TOOLS, dispatch_tool, get_tool_definitions
+from tools.registry import DEMO_TOOLS, DEV_ONLY_TOOLS, dispatch_tool, get_tool_definitions
 
 
 def test_developer_mode_on_includes_dev_tools():
     names = {t["name"] for t in get_tool_definitions(developer_mode=True)}
     assert DEV_ONLY_TOOLS <= names
+
+
+def test_demo_mode_exposes_only_demo_tools():
+    names = {t["name"] for t in get_tool_definitions(developer_mode=True, demo_mode=True)}
+    assert names == set(DEMO_TOOLS)
+
+
+def test_demo_tools_all_exist_in_registry():
+    all_names = {t["name"] for t in get_tool_definitions(developer_mode=True)}
+    assert DEMO_TOOLS <= all_names
 
 
 def test_developer_mode_off_excludes_dev_tools():
