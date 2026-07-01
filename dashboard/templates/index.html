@@ -79,32 +79,32 @@
         </header>
 
         <div class="metric-grid">
-          <article class="metric-card">
+          <article class="metric-card" data-metric="queries">
             <i class="ti ti-message-circle metric-ico" aria-hidden="true"></i>
             <div class="metric-val" id="metric-queries">0</div>
             <div class="metric-lbl">Queries today</div>
           </article>
-          <article class="metric-card">
+          <article class="metric-card" data-metric="tools">
             <i class="ti ti-tool metric-ico" aria-hidden="true"></i>
             <div class="metric-val" id="metric-tools">0</div>
             <div class="metric-lbl">Tools run today</div>
           </article>
-          <article class="metric-card">
+          <article class="metric-card" data-metric="uptime">
             <i class="ti ti-clock metric-ico" aria-hidden="true"></i>
             <div class="metric-val" id="metric-uptime">0m</div>
             <div class="metric-lbl">Session uptime</div>
           </article>
-          <article class="metric-card">
+          <article class="metric-card" data-metric="plugins">
             <i class="ti ti-puzzle metric-ico" aria-hidden="true"></i>
             <div class="metric-val" id="metric-plugins">0</div>
             <div class="metric-lbl">Active plugins</div>
           </article>
-          <article class="metric-card">
+          <article class="metric-card" data-metric="contacts">
             <i class="ti ti-address-book metric-ico" aria-hidden="true"></i>
             <div class="metric-val" id="metric-contacts">—</div>
             <div class="metric-lbl">Contacts</div>
           </article>
-          <article class="metric-card">
+          <article class="metric-card" data-metric="sessions">
             <i class="ti ti-layers-subtract metric-ico" aria-hidden="true"></i>
             <div class="metric-val" id="metric-sessions">0</div>
             <div class="metric-lbl">Active sessions</div>
@@ -478,7 +478,7 @@
         <i class="ti ti-volume" id="dock-mute-ico" aria-hidden="true"></i>
       </button>
       <button type="button" id="dock-send" class="icon-btn primary" title="Send" aria-label="Send">
-        <i class="ti ti-send" aria-hidden="true"></i>
+        <i class="ti ti-send" aria-hidden="true"></i><span class="dock-send-label">Send</span>
       </button>
       <button type="button" id="dock-stop" class="icon-btn danger hidden" title="Stop" aria-label="Stop">
         <i class="ti ti-player-stop" aria-hidden="true"></i>
