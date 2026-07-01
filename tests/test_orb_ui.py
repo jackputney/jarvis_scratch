@@ -98,6 +98,64 @@ def test_face_window_does_not_use_tool_flag():
         app.processEvents()
 
 
+def _make_orb():
+    import sys
+
+    from PyQt6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication(sys.argv)
+    return app, OrbWidget()
+
+
+def _drive(animator, state: str, ticks: int) -> None:
+    animator.set_state(state)
+    for _ in range(ticks):
+        animator._tick()
+
+
+def test_speaking_emits_ripple_phases():
+    """SPEAKING drives two staggered ripple phases within [0, 1)."""
+    app, orb = _make_orb()
+    anim = orb._animator
+    _drive(anim, "SPEAKING", 10)
+    p1, p2 = anim._ripple_phases
+    assert 0.0 <= p1 < 1.0
+    assert 0.0 <= p2 < 1.0
+    assert p1 != p2  # staggered, never in lock-step
+    orb.stop_animations()
+    app.processEvents()
+
+
+def test_listening_wake_bloom_then_settle():
+    """Entering LISTENING flashes a glow burst that settles to the steady level."""
+    app, orb = _make_orb()
+    anim = orb._animator
+    _drive(anim, "LISTENING", 2)  # ~66 ms in — bloom active
+    bloom_glow = anim.glow_intensity
+    _drive(anim, "LISTENING", 15)  # ~560 ms in — settled
+    settled_glow = anim.glow_intensity
+    assert bloom_glow > settled_glow
+    assert settled_glow == 0.7
+    orb.stop_animations()
+    app.processEvents()
+
+
+def test_waiting_confirm_breathes_smoothly():
+    """WAITING_CONFIRM glow varies continuously (no hard on/off jump)."""
+    app, orb = _make_orb()
+    anim = orb._animator
+    anim.set_state("WAITING_CONFIRM")
+    samples = []
+    for _ in range(30):
+        anim._tick()
+        samples.append(anim.glow_intensity)
+    assert max(samples) > min(samples)  # it moves
+    deltas = [abs(b - a) for a, b in zip(samples, samples[1:])]
+    assert max(deltas) < 0.2  # but never jumps discontinuously
+    orb.stop_animations()
+    app.processEvents()
+
+
 def test_face_set_state_cross_thread_no_typeerror():
     """F1 — pipeline worker threads must not crash the Qt orb with TypeError."""
     import sys

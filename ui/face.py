@@ -174,6 +174,8 @@ class OrbAnimator:
         self.specular_alpha = 200
         self._sonar_phase = 0.0
         self._sonar_radius = 0.0
+        # SPEAKING ripple rings — two staggered phases in [0, 1)
+        self._ripple_phases: tuple[float, float] = (1.0, 1.0)
 
         self._timer = QTimer()
         self._timer.timeout.connect(self._tick)
@@ -233,10 +235,17 @@ class OrbAnimator:
         self._lerp_core_toward_target()
 
     def _anim_listening(self) -> None:
-        self.glow_intensity = 0.7
-        self.glow_extent = 8.0
-        self.specular_alpha = 240
         elapsed = self._t - self._state_enter_t
+        # Wake bloom — a brief bright burst when the wake word lands, so the
+        # user gets instant visual confirmation that Jarvis heard them.
+        if elapsed < 350:
+            bloom = 1.0 - (elapsed / 350.0)
+            self.glow_intensity = 0.7 + 0.5 * bloom
+            self.glow_extent = 8.0 + 10.0 * bloom
+        else:
+            self.glow_intensity = 0.7
+            self.glow_extent = 8.0
+        self.specular_alpha = 240
         if elapsed < 200:
             frac = elapsed / 200.0
             self._target_core_radius = CORE_RADIUS + 2.0 * frac
@@ -266,12 +275,18 @@ class OrbAnimator:
         self.glow_extent = 8.0 + 4.0 * (0.5 + 0.5 * pulse)
         self.specular_alpha = 150 + 70 * (0.5 + 0.5 * pulse)
         self._core_radius = CORE_RADIUS + 1.5 * pulse
+        # Ripple rings expanding from the sphere — two staggered 1.2 s cycles.
+        elapsed = self._t - self._state_enter_t
+        p1 = (elapsed % 1200) / 1200.0
+        p2 = ((elapsed + 600) % 1200) / 1200.0
+        self._ripple_phases = (p1, p2)
 
     def _anim_waiting_confirm(self) -> None:
-        cycle = self._t % 2000
-        on_phase = cycle < 1500
-        self.glow_intensity = 0.8 if on_phase else 0.15
-        self.glow_extent = 8.0
+        # Smooth amber breathing (2 s cycle) — calmer than a hard on/off blink
+        # but still clearly "I need something from you".
+        breath = 0.5 + 0.5 * math.sin(self._t * 2 * math.pi / 2000)
+        self.glow_intensity = 0.2 + 0.6 * breath
+        self.glow_extent = 8.0 + 4.0 * breath
         self.specular_alpha = 200
         self._target_core_radius = CORE_RADIUS
         self._lerp_core_toward_target()
@@ -395,12 +410,24 @@ class OrbWidget(QWidget):
         painter.drawEllipse(QPointF(cx, cy + 4), orb_r * 1.1, orb_r * 0.7)
 
         # Listening sonar ping
-        if anim.state == "LISTENING" and anim._sonar_phase < 1.0:
+        if anim.state in ("LISTENING", "FOLLOWUP_WINDOW") and anim._sonar_phase < 1.0:
             ping_alpha = int(80 * (1.0 - anim._sonar_phase) * scale)
             ping_pen = QPen(QColor(c.red(), c.green(), c.blue(), ping_alpha), 1.0)
             painter.setPen(ping_pen)
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawEllipse(QPointF(cx, cy), anim._sonar_radius, anim._sonar_radius)
+
+        # Speaking ripple rings — expand outward and fade as the voice plays
+        if anim.state == "SPEAKING":
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            for phase in anim._ripple_phases:
+                if phase >= 1.0:
+                    continue
+                ring_r = orb_r + 4.0 + phase * 16.0
+                ring_alpha = int(70 * (1.0 - phase) * scale)
+                ring_pen = QPen(QColor(c.red(), c.green(), c.blue(), ring_alpha), 1.5)
+                painter.setPen(ring_pen)
+                painter.drawEllipse(QPointF(cx, cy), ring_r, ring_r * 0.96)
 
         # Layer 2 — ambient glow
         glow_grad = QRadialGradient(cx, cy, glow_r)
