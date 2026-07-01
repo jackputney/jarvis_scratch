@@ -34,7 +34,7 @@ from config import Config
 logger = logging.getLogger("jarvis.twilio")
 
 TWILIO_PORT = 8765
-PHONE_GREETING = "Hello, this is Jarvis. How can I help?"
+PHONE_GREETING = "Hi, you've reached Jarvis, an AI assistant. How can I help you today?"
 PHONE_MAX_CONSECUTIVE_MISSES = 3
 PHONE_HALT_FAREWELL = "Connecting you to someone who can help."
 
