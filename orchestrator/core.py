@@ -208,6 +208,7 @@ class Orchestrator:
         sentence_q: queue.Queue[str | None] | None = None
         tts_thread: threading.Thread | None = None
         tts_audio_started = False
+        tts_stream_ok = False
         result: dict[str, Any] = {}
         use_stream_tts = (
             command.speak
@@ -236,13 +237,25 @@ class Orchestrator:
                         self._set_state("SPEAKING")
 
                     def _run_stream_tts() -> None:
+                        nonlocal tts_stream_ok
                         from tts.router import speak_stream
 
-                        speak_stream(
-                            _sentence_iter(),
-                            voice_id=None,
-                            on_first_chunk=_mark_speaking,
-                        )
+                        try:
+                            speak_stream(
+                                _sentence_iter(),
+                                voice_id=None,
+                                on_first_chunk=_mark_speaking,
+                            )
+                            tts_stream_ok = not self._interrupt_set()
+                        except Exception as exc:  # noqa: BLE001
+                            logger.warning(
+                                "⚠️  Streaming TTS failed — will fall back to full reply: %s",
+                                exc,
+                                exc_info=True,
+                            )
+                            from tts.router import stop_speech
+
+                            stop_speech()
 
                     tts_thread = threading.Thread(
                         target=_run_stream_tts,
@@ -342,7 +355,7 @@ class Orchestrator:
                         break
                     tts_thread.join(timeout=0.1)
                 tts_thread.join()
-            # stream_spoken without playback leaves the user silent — speak the full reply.
+            # Streaming marked sentences but playback did not finish — speak the full reply.
             if (
                 use_stream_tts
                 and command.speak
@@ -350,9 +363,13 @@ class Orchestrator:
                 and job.state in (JobState.DONE, JobState.FAILED)
                 and bool(job.reply.strip())
                 and bool(result.get("stream_spoken"))
-                and not tts_audio_started
+                and not tts_stream_ok
             ):
                 spoken = f"{job.warning} {job.reply}" if job.warning else job.reply
+                logger.info(
+                    "🔊 Streaming TTS incomplete (audio_started=%s) — speaking full reply.",
+                    tts_audio_started,
+                )
                 self._set_state("SPEAKING")
                 self._do_speak(spoken, cfg)
             self._set_state("IDLE")

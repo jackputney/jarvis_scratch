@@ -195,6 +195,77 @@ def test_voice_command_uses_streaming_tts_when_enabled(make_orch, monkeypatch):
     assert spoken == ["First sentence."]
 
 
+def test_streaming_tts_falls_back_when_stream_fails_before_audio(make_orch, monkeypatch):
+    batch: list[str] = []
+
+    def fail_stream(chunks, **kw):
+        list(chunks)
+        from tts.errors import TTSError
+
+        raise TTSError("simulated pre-audio failure")
+
+    monkeypatch.setattr("tts.router.speak_stream", fail_stream)
+
+    class Cfg:
+        streaming_tts = True
+
+    def pq(text, cfg, on_state=None, speak=False, on_sentence=None):
+        if on_sentence:
+            on_sentence("Hello there.")
+        return {"reply": "Hello there.", "model": "m", "stream_spoken": True}
+
+    orch, _ev = make_orch(
+        pq,
+        speak=lambda t, **kw: batch.append(t),
+        config_loader=lambda: Cfg(),
+    )
+    job = orch.wait(
+        orch.submit(Command("hi", CommandSource.VOICE, speak=True)).job_id,
+        timeout=5,
+    )
+    assert job.state == JobState.DONE
+    assert batch == ["Hello there."]
+
+
+def test_streaming_tts_falls_back_on_mid_stream_failure(make_orch, monkeypatch):
+    batch: list[str] = []
+
+    def flaky_stream(chunks, **kw):
+        items = list(chunks)
+        on_first = kw.get("on_first_chunk")
+        if on_first and items:
+            on_first()
+        if len(items) > 1:
+            raise RuntimeError("simulated mid-stream failure")
+
+    monkeypatch.setattr("tts.router.speak_stream", flaky_stream)
+
+    class Cfg:
+        streaming_tts = True
+
+    def pq(text, cfg, on_state=None, speak=False, on_sentence=None):
+        if on_sentence:
+            on_sentence("First sentence.")
+            on_sentence("Second sentence.")
+        return {
+            "reply": "First sentence. Second sentence.",
+            "model": "m",
+            "stream_spoken": True,
+        }
+
+    orch, _ev = make_orch(
+        pq,
+        speak=lambda t, **kw: batch.append(t),
+        config_loader=lambda: Cfg(),
+    )
+    job = orch.wait(
+        orch.submit(Command("hi", CommandSource.VOICE, speak=True)).job_id,
+        timeout=5,
+    )
+    assert job.state == JobState.DONE
+    assert batch == ["First sentence. Second sentence."]
+
+
 def test_pipeline_state_events_emitted(make_orch):
     seen: list[str] = []
     orch, _ev = make_orch(lambda text, cfg, on_state=None, speak=False: {"reply": "ok"})
