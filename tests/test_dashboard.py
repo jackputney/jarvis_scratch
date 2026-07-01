@@ -46,6 +46,23 @@ def test_state_shape(client):
     assert data["pending_confirm"] is None
 
 
+def test_state_exposes_modes(client):
+    """Dashboard needs demo/developer mode to render the mode pill."""
+    data = client.get("/api/state").get_json()
+    assert isinstance(data["demo_mode"], bool)
+    assert isinstance(data["developer_mode"], bool)
+
+
+def test_tools_include_usage_counts(client):
+    """Every tool carries a lifetime usage_count (evidence base for the tool cull)."""
+    tools = client.get("/api/tools").get_json()["tools"]
+    assert tools, "tool list should not be empty"
+    for t in tools:
+        assert "usage_count" in t, t["name"]
+        assert isinstance(t["usage_count"], int)
+        assert t["usage_count"] >= 0
+
+
 def test_variable_crud(client):
     assert client.post("/api/variables", json={"key": "home_city", "value": "London"}).get_json()["ok"]
     assert client.get("/api/variables").get_json()["home_city"] == "London"

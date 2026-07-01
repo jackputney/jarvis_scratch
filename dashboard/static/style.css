@@ -1446,6 +1446,27 @@ ul.notes li .title:hover { color: var(--accent-bright); }
 .plugin-status.active { color: var(--good); }
 .plugin-status.inactive { color: var(--muted); }
 
+/* ---- Mode pill (sidebar) ---- */
+.mode-pill {
+  margin-left: auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+.mode-pill.demo {
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.12);
+  border: 1px solid rgba(251, 191, 36, 0.35);
+}
+
+/* ---- Tool usage counts ---- */
+.tool-card.never-used { opacity: 0.55; }
+.tool-card.never-used:hover { opacity: 0.85; }
+.tc-usage { color: var(--muted); }
+.tool-card:not(.never-used) .tc-usage { color: var(--accent, #6c7bf7); }
+
 /* ---- Reduced motion ---- */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

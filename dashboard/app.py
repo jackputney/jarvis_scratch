@@ -201,6 +201,8 @@ def create_app() -> Flask:
             "pending_confirm": _pending_confirm(),
             "phone_autonomous_enabled": cfg.phone_autonomous_enabled,
             "phone_active_call_sid": _active_phone_call_sid(),
+            "demo_mode": cfg.demo_mode,
+            "developer_mode": cfg.developer_mode,
         })
 
     @app.route("/api/metrics")
@@ -461,9 +463,39 @@ def create_app() -> Flask:
                 return "write"
             return "write"
 
+        def usage_counts() -> dict[str, int]:
+            """Lifetime invocation count per tool: voice (events) + dashboard (tool_runs)."""
+            from memory.db import connect
+
+            counts: dict[str, int] = {}
+            try:
+                with connect() as conn:
+                    for name, n in conn.execute(
+                        """
+                        SELECT json_extract(payload_json, '$.tool_name'), COUNT(*)
+                        FROM events
+                        WHERE type = 'tool_call' AND payload_json IS NOT NULL
+                        GROUP BY 1
+                        """,
+                    ).fetchall():
+                        if name:
+                            counts[name] = counts.get(name, 0) + int(n)
+                    for name, n in conn.execute(
+                        "SELECT tool_name, COUNT(*) FROM tool_runs GROUP BY tool_name",
+                    ).fetchall():
+                        if name:
+                            counts[name] = counts.get(name, 0) + int(n)
+            except Exception:
+                logger.warning("Could not compute tool usage counts", exc_info=True)
+            return counts
+
         cfg = Config.load()
         defs = get_tool_definitions(cfg.developer_mode, cfg.demo_mode)
-        tools = [{**defn, "tier": tier(defn["name"])} for defn in defs]
+        usage = usage_counts()
+        tools = [
+            {**defn, "tier": tier(defn["name"]), "usage_count": usage.get(defn["name"], 0)}
+            for defn in defs
+        ]
         return jsonify({"tools": tools})
 
     @app.route("/api/tools/run", methods=["POST"])

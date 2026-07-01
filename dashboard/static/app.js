@@ -954,6 +954,9 @@ function renderState(s) {
   updateMuteDisplay(s.muted);
   $("models").textContent = `${s.models.fast} / ${s.models.smart}`;
 
+  const demoPill = $("demo-pill");
+  if (demoPill) demoPill.classList.toggle("hidden", !s.demo_mode);
+
   const sp = s.spend;
   $("spend-amount").textContent = money(sp.today);
   const pct = Math.min(100, sp.daily_pct);
@@ -1038,12 +1041,14 @@ function renderTools() {
     const [icon, cat] = TOOL_META[tool.name] || ["🔧", "Tool"];
     const card = document.createElement("button");
     card.type = "button";
-    card.className = "tool-card";
+    const used = tool.usage_count || 0;
+    card.className = "tool-card" + (used === 0 ? " never-used" : "");
+    const usageLabel = used === 0 ? "never used" : `used ${used}×`;
     card.innerHTML =
       `<div class="tc-top"><span class="tc-ico">${icon}</span><span class="tool-badge ${tool.tier}">${TIER_LABEL[tool.tier]}</span></div>` +
       `<div class="tc-name">${esc(tool.name)}</div>` +
       `<div class="tc-desc">${esc(tool.description)}</div>` +
-      `<div class="card-sub">${cat}</div>`;
+      `<div class="card-sub">${cat} · <span class="tc-usage">${usageLabel}</span></div>`;
     card.onclick = () => openDrawer(tool);
     gallery.appendChild(card);
   });
