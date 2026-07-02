@@ -30,6 +30,9 @@ def _resolve_elevenlabs_voice(voice_id: str | None, cfg: Config) -> str:
 def effective_tts_provider(cfg: "Config", provider: str | None = None) -> str:
     """Provider that will actually run given configured API keys."""
     chosen = (provider or cfg.tts_provider or "elevenlabs").strip().lower()
+    # Demo mode: ElevenLabs only — never silently switch to Cartesia/pyttsx3 mid-demo.
+    if getattr(cfg, "demo_mode", False):
+        return "elevenlabs"
     if chosen == "elevenlabs" and not (cfg.elevenlabs_api_key or "").strip():
         if (cfg.cartesia_api_key or "").strip():
             return "cartesia"
@@ -125,6 +128,13 @@ def _speak_with_cfg(
                 break
             logger.warning("ElevenLabs attempt %d failed: %s", attempt + 1, exc)
             time.sleep(0.4 * (attempt + 1))
+    if getattr(cfg, "demo_mode", False):
+        logger.error(
+            "🔊 ElevenLabs failed in demo_mode (%s) — NOT falling back; voice must stay "
+            "ElevenLabs. Fix credits/network before the demo.",
+            last_exc,
+        )
+        return
     logger.warning(
         "ElevenLabs unavailable (%s) — falling back to Cartesia",
         last_exc,
@@ -228,6 +238,13 @@ def speak_stream(
             time.sleep(0.4 * (attempt + 1))
 
     if not buffer:
+        return
+    if getattr(cfg, "demo_mode", False):
+        logger.error(
+            "🔊 ElevenLabs stream failed in demo_mode (%s) — NOT falling back; voice must "
+            "stay ElevenLabs. Fix credits/network before the demo.",
+            last_exc,
+        )
         return
     logger.warning(
         "ElevenLabs stream unavailable (%s) — falling back to Cartesia",
