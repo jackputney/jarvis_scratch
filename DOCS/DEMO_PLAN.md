@@ -15,10 +15,12 @@ Stop adding capability. Every hour from here goes into making a *small* set of t
    (`DOCS/WHITELABEL_SCAN.md`) docs only mattered for a phone/medical product we're no longer
    chasing — ignore them. Don't delete anything; just don't run or demo it.
 
-2. **Cut tools from ~84 to ~5–6** that look great and never flake. Suggested set: today's
-   calendar, weather, play music, web search / answer a question, take-a-note / remember. Use the
-   existing risk-tier / developer-mode hiding in `tools/registry.py` to hide everything else so it
-   can't misfire mid-demo. This is flipping switches, not deleting code.
+2. **Cut tools to a small allowlist — DONE.** Added `Config.demo_mode` (default off) + a
+   `DEMO_TOOLS` allowlist in `tools/registry.py`. Turn it on with `"demo_mode": true` in the demo
+   machine's `config.json`; everything outside the list is hidden so it can't misfire. Reversible,
+   nothing deleted. Current 9-tool set: `get_todays_schedule`, `get_calendar_events`,
+   `get_unread_emails`, `search_emails`, `send_email`, `get_weather`, `web_search`, `remember`,
+   `search_and_play`. **Gmail + Calendar need the Google account signed in on the demo machine.**
 
 3. **Pick ONE demo machine and make only it perfect.** Recommend Jack's Mac (better STT via mlx +
    the polished orb UI). Do not chase Windows/Mac parity.
@@ -30,6 +32,24 @@ Stop adding capability. Every hour from here goes into making a *small* set of t
 5. **Polish what's seen and heard:** clean startup (no error spew), the orb reacting on
    listen/speak, and the premium ElevenLabs voice. That surface is most of what makes it feel
    finished.
+
+## Voice & smoothness (Mac tuning — this is what makes it feel "perfect")
+
+**ElevenLabs only — DONE in code.** In `demo_mode` the TTS router uses ElevenLabs and will NOT
+fall back to Cartesia/pyttsx3 on error (it logs loudly instead), so the voice can never switch
+mid-demo. Streaming + `eleven_flash_v2_5` already on. The rest below must be tuned live on the Mac
+by ear — cannot be done from Windows:
+
+- **Pick the voice deliberately.** Current default `elevenlabs_voice_id = JBFqnCBsd6RMkjVDRZzb` is
+  generic. Audition voices in the dashboard picker and choose one that sounds great *streaming*.
+- **Model dial:** `eleven_flash_v2_5` (fastest, snappiest). If the voice sounds thin, try
+  `eleven_turbo_v2_5` (richer, still fast). Pick by ear.
+- **Warm up before the demo** — one throwaway "hey Jarvis" so the first real reply isn't the slow one.
+- **Tune `vad_silence_ms`** (pause before Jarvis replies, currently 1400ms). Lower = snappier but
+  risks cutting the speaker off. Adjust by ear on the Mac.
+- **Good mic + solid WiFi** — ElevenLabs streaming is network-dependent; weak connection = stutter.
+  Test on the actual demo network.
+- **Barge-in** (talking over Jarvis): test it, or keep it out of the script if it feels rough.
 
 ## Explicitly NOT doing
 - No phone, compliance, medical/vertical work.
