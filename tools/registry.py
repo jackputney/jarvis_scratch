@@ -1293,7 +1293,8 @@ DEMO_TOOLS = frozenset({
     "get_todays_schedule",  # calendar — today
     "get_calendar_events",  # calendar — arbitrary day/range
     "get_unread_emails",    # gmail — unread
-    "search_emails",        # gmail — find an email (read-only; send_email left out for demo safety)
+    "search_emails",        # gmail — find an email
+    "send_email",           # gmail — send (only side-effecting demo tool; speak recipient clearly)
     "get_weather",          # weather
     "web_search",           # answer general questions
     "remember",             # take a note / remember a fact
